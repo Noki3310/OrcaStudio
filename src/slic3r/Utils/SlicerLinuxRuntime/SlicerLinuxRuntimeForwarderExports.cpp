@@ -1648,7 +1648,9 @@ SLICER_LINUX_RUNTIME_EXPORT int slicer_linux_runtime_http_request(
 
     std::string accumulated_body;
     bool cancel_sent = false;
-    nlohmann::json final_status;
+    // An aborted poll never assigns a terminal reply. Keep an object so the
+    // result getters return defaults instead of throwing type_error.306.
+    nlohmann::json final_status = nlohmann::json::object();
     for (;;) {
         if (g_forwarder_shutting_down.load(std::memory_order_acquire)) {
             if (error)
@@ -1723,7 +1725,8 @@ SLICER_LINUX_RUNTIME_EXPORT int slicer_linux_runtime_http_request(
     if (primary_ip)
         *primary_ip = final_status.value("primary_ip", std::string());
     if (error && error->empty())
-        *error = final_status.value("error", std::string());
+        *error = final_status.empty() ? "Linux HTTP request ended without a final status"
+                                    : final_status.value("error", std::string());
     return final_status.value("transport_ok", false) ? 0 : -1;
 }
 
