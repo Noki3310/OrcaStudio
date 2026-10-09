@@ -19,6 +19,11 @@
 #include "libslic3r/Preset.hpp"
 
 #include <boost/log/trivial.hpp>
+#include "libslic3r/AppConfig.hpp"
+#include <nlohmann/json.hpp>
+#include <wx/textdlg.h>
+#include <wx/button.h>
+#include <stdexcept>
 
 namespace Slic3r { namespace GUI {
 
@@ -265,7 +270,7 @@ void AMSFilamentPanel::msw_rescale()
 
 
 AMSDryCtrWin::AMSDryCtrWin(wxWindow *parent)
-    :DPIDialog(parent, wxID_ANY, _L("AMS Dryness Control"), wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX)
+    :DPIDialog(parent, wxID_ANY, _L("AMS Dryness Control"), wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX | wxRESIZE_BORDER)
 {
     create();
 }
@@ -412,6 +417,91 @@ Button* AMSDryCtrWin::create_button(wxPanel* parent, const wxString& title,
     return button;
 }
 
+
+namespace {
+nlohmann::json read_drying_profiles()
+{
+    const auto raw = wxGetApp().app_config->get("ams_drying_profiles");
+    auto profiles = nlohmann::json::parse(raw, nullptr, false);
+    return profiles.is_object() ? profiles : nlohmann::json::object();
+}
+}
+
+void AMSDryCtrWin::reload_user_profiles()
+{
+    m_user_profiles->Clear();
+    const auto profiles = read_drying_profiles();
+    for (auto it = profiles.begin(); it != profiles.end(); ++it)
+        m_user_profiles->Append(wxString::FromUTF8(it.key()));
+}
+
+void AMSDryCtrWin::load_user_profile()
+{
+    auto system = get_fila_system();
+    auto* ams = system ? system->GetAmsById(m_ams_info.m_ams_id) : nullptr;
+    if (!ams || !is_dry_ctr_idle(ams) || m_user_profiles->GetSelection() == wxNOT_FOUND) return;
+    try {
+        const auto profiles = read_drying_profiles();
+        const auto& profile = profiles.at(m_user_profiles->GetStringSelection().ToUTF8().data());
+        const auto id = profile.at("filament_id").get<std::string>();
+        const int temperature = profile.at("temperature").get<int>();
+        const int hours = profile.at("hours").get<int>();
+        if (temperature < 45 || temperature > 85 || hours < 1 || hours > 24)
+            throw std::runtime_error("Invalid drying profile range");
+        const auto it = std::find_if(m_tray_ids.begin(), m_tray_ids.end(),
+            [&](const FilamentBaseInfo& info) { return info.filament_id == id; });
+        if (it == m_tray_ids.end()) {
+            wxMessageBox(_L("The material for this profile is not available for the selected printer. Enable its filament preset first."),
+                         _L("My drying profiles"), wxOK | wxICON_WARNING, this);
+            return;
+        }
+        m_trays_combo->SetSelection(static_cast<int>(it - m_tray_ids.begin()));
+        m_temperature_input->SetValue(std::to_string(temperature));
+        m_time_input->SetValue(std::to_string(hours));
+        update_normal_description(ams);
+    } catch (const std::exception&) {
+        wxMessageBox(_L("This drying profile is invalid. Please save it again."), _L("My drying profiles"), wxOK | wxICON_ERROR, this);
+    }
+}
+
+void AMSDryCtrWin::save_user_profile()
+{
+    long temperature = 0, hours = 0;
+    const int selected = m_trays_combo->GetSelection();
+    if (selected < 0 || selected >= static_cast<int>(m_tray_ids.size()) ||
+        !m_temperature_input->GetValue().ToLong(&temperature) || !m_time_input->GetValue().ToLong(&hours) ||
+        temperature < 45 || temperature > 85 || hours < 1 || hours > 24) {
+        wxMessageBox(_L("Select a material and enter a temperature from 45 to 85 °C and a duration from 1 to 24 hours."),
+                     _L("My drying profiles"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+    wxTextEntryDialog dialog(this, _L("Profile name"), _L("Save profile as..."), m_user_profiles->GetStringSelection());
+    if (dialog.ShowModal() != wxID_OK) return;
+    wxString name = dialog.GetValue(); name.Trim().Trim(false);
+    if (name.IsEmpty()) return;
+    auto profiles = read_drying_profiles();
+    const std::string key = name.ToUTF8().data();
+    if (profiles.contains(key) && wxMessageBox(_L("Replace the existing drying profile?"),
+        _L("My drying profiles"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
+    profiles[key] = {{"filament_id", m_tray_ids[selected].filament_id}, {"temperature", temperature}, {"hours", hours}};
+    wxGetApp().app_config->set("ams_drying_profiles", profiles.dump());
+    wxGetApp().app_config->save();
+    reload_user_profiles();
+    m_user_profiles->SetStringSelection(name);
+}
+
+void AMSDryCtrWin::delete_user_profile()
+{
+    if (m_user_profiles->GetSelection() == wxNOT_FOUND) return;
+    if (wxMessageBox(_L("Delete the selected drying profile?"), _L("My drying profiles"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
+    auto profiles = read_drying_profiles();
+    profiles.erase(m_user_profiles->GetStringSelection().ToUTF8().data());
+    wxGetApp().app_config->set("ams_drying_profiles", profiles.dump());
+    wxGetApp().app_config->save();
+    reload_user_profiles();
+}
+
 wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
 {
     wxBoxSizer* normal_state_sizer = new wxBoxSizer(wxVERTICAL);
@@ -420,6 +510,20 @@ wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
     description_label->SetForegroundColour(*wxBLACK);
     description_label->SetFont(Label::Head_14);
     normal_state_sizer->Add(description_label, 0, wxALL, FromDIP(5));
+
+    m_user_profiles = new wxChoice(parent, wxID_ANY);
+    normal_state_sizer->Add(new Label(parent, _L("My drying profiles")), 0, wxALL, FromDIP(5));
+    normal_state_sizer->Add(m_user_profiles, 0, wxEXPAND | wxALL, FromDIP(5));
+    reload_user_profiles();
+    m_user_profiles->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { load_user_profile(); });
+    auto* profile_buttons = new wxBoxSizer(wxVERTICAL);
+    auto* save_profile = new wxButton(parent, wxID_ANY, _L("Save profile as..."));
+    auto* delete_profile = new wxButton(parent, wxID_ANY, _L("Delete profile"));
+    profile_buttons->Add(save_profile, 0, wxBOTTOM, FromDIP(5));
+    profile_buttons->Add(delete_profile, 0);
+    normal_state_sizer->Add(profile_buttons, 0, wxALL, FromDIP(5));
+    save_profile->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { save_user_profile(); });
+    delete_profile->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { delete_user_profile(); });
 
     // Part 2: ComboBox for material selection
     wxBoxSizer* combo_sizer = new wxBoxSizer(wxHORIZONTAL);
@@ -456,12 +560,12 @@ wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
 
     Label* temp_unit_label = new Label(parent, wxString::FromUTF8(u8"\u2103" /* °C */));
     temp_unit_label->SetForegroundColour(*wxBLACK);
-    temp_sizer->Add(m_temperature_input, 1, wxRIGHT, FromDIP(1));
+    temp_sizer->Add(m_temperature_input, 0, wxRIGHT, FromDIP(1));
     temp_sizer->Add(temp_unit_label, 0, wxALIGN_CENTER_VERTICAL);
 
     // Time part
     wxBoxSizer* time_sizer = new wxBoxSizer(wxHORIZONTAL);
-    m_time_input = new wxTextCtrl(parent, wxID_ANY, "", wxDefaultPosition, wxSize(FromDIP(100), -1));
+    m_time_input = new wxTextCtrl(parent, wxID_ANY, "", wxDefaultPosition, wxSize(FromDIP(65), -1));
     m_time_input->SetMaxLength(3); // Limit to 3 digits
 
     m_time_input->Bind(wxEVT_CHAR, [this](wxKeyEvent& event) {
@@ -481,14 +585,14 @@ wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
     m_time_input->SetBackgroundColour(StateColor::darkModeColorFor(*wxWHITE));
     m_time_input->SetForegroundColour(StateColor::darkModeColorFor(*wxBLACK));
 
-    Label* time_unit_label = new Label(parent, "H");
+    Label* time_unit_label = new Label(parent, _L("hours"));
     time_unit_label->SetForegroundColour(*wxBLACK);
-    time_sizer->Add(m_time_input, 1, wxRIGHT, FromDIP(1));
+    time_sizer->Add(m_time_input, 0, wxRIGHT, FromDIP(1));
     time_sizer->Add(time_unit_label, 0, wxALIGN_CENTER_VERTICAL);
 
     wxBoxSizer* input_sizer = new wxBoxSizer(wxHORIZONTAL);
-    input_sizer->Add(temp_sizer, 1, wxRIGHT, FromDIP(10));
-    input_sizer->Add(time_sizer, 1, 0);
+    input_sizer->Add(temp_sizer, 0, wxRIGHT, FromDIP(10));
+    input_sizer->Add(time_sizer, 0, 0);
     normal_state_sizer->Add(input_sizer, 0, wxEXPAND | wxALL, FromDIP(5));
 
     // Part 4: Abnormal description/message area
@@ -500,7 +604,7 @@ wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
     // Part 5: Start button
     m_next_button = create_button(
         parent,
-        _L("Start"),
+        _L("Start drying"),
         AMS_CONTROL_BRAND_COLOUR,  // Background color - green
         AMS_CONTROL_BRAND_COLOUR,  // Border color - green
         wxColour("#FFFFFE")        // Text color - white
@@ -756,7 +860,7 @@ wxBoxSizer* AMSDryCtrWin::create_guide_right_section(wxPanel* parent)
 
     m_start_button = create_button(
         parent,
-        _L("Start"),
+        _L("Start drying"),
         AMS_CONTROL_BRAND_COLOUR,  // Background color - green
         AMS_CONTROL_BRAND_COLOUR,  // Border color - green
         wxColour("#FFFFFE")        // Text color - white
@@ -827,7 +931,8 @@ bool AMSDryCtrWin::start_sending_drying_command()
     auto* ams = fila_system->GetAmsById(m_ams_info.m_ams_id);
     if (!ams) return false;
     update_normal_description(ams);
-    if (!m_next_button->IsEnabled()) return false;
+    update_filament_guide_info(ams);
+    if (!m_next_button->IsEnabled() || !m_start_button->IsEnabled()) return false;
     long ams_id = -1;
     if (!wxString::FromUTF8(m_ams_info.m_ams_id.c_str()).ToLong(&ams_id) || ams_id < 0 || ams_id > 255)
         return false;
@@ -1008,9 +1113,8 @@ void AMSDryCtrWin::create()
     std::string icon_path = (boost::format("%1%/images/OrcaSlicerTitle.ico") % resources_dir()).str(); // Orca: app title icon
     SetIcon(wxIcon(encode_path(icon_path.c_str()), wxBITMAP_TYPE_ICO));
 
-    SetSize(wxSize(FromDIP(700), FromDIP(500)));
+    SetSize(wxSize(FromDIP(860), FromDIP(640)));
     SetMinSize(wxSize(FromDIP(700), FromDIP(500)));
-    SetMaxSize(wxSize(FromDIP(700), FromDIP(500)));
 
     m_main_simplebook = new wxSimplebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
 
@@ -1116,32 +1220,28 @@ void AMSDryCtrWin::set_ams_id(const std::string& ams_id)
 
 void AMSDryCtrWin::update_img_description(DevAms::DryStatus status, DevAms::DrySubStatus sub_status)
 {
-    if (status == DevAms::DryStatus::Off || status == DevAms::DryStatus::Cooling) {
-        m_image_description->SetLabel(_L("Idle"));
-        m_image_description_icon->Show(false);
-        return;
-    }
-
-    // Determine label text for non-idle states
     wxString label_text;
-    if (status == DevAms::DryStatus::Error) {
-        label_text = _L("Drying");
-    } else if (sub_status == DevAms::DrySubStatus::Heating) {
-        label_text = _L("Drying-Heating");
-    } else if (sub_status == DevAms::DrySubStatus::Dehumidify) {
-        label_text = _L("Drying-Dehumidifying");
-    } else {
-        m_image_description_icon->Show(false);
-        return;
+    switch (status) {
+    case DevAms::DryStatus::Off: label_text = _L("Idle"); break;
+    case DevAms::DryStatus::Checking: label_text = _L("Checking drying conditions"); break;
+    case DevAms::DryStatus::Drying:
+        label_text = sub_status == DevAms::DrySubStatus::Heating ? _L("Drying-Heating") :
+            sub_status == DevAms::DrySubStatus::Dehumidify ? _L("Drying-Dehumidifying") : _L("Drying");
+        break;
+    case DevAms::DryStatus::Cooling: label_text = _L("Cooling down"); break;
+    case DevAms::DryStatus::Stopping: label_text = _L("Stopping"); break;
+    case DevAms::DryStatus::Error: label_text = _L("Drying Error"); break;
+    case DevAms::DryStatus::CannotStopHeatOutofControl: label_text = _L("Heating fault: check the AMS display"); break;
+    default: label_text = _L("Unknown drying status"); break;
     }
-
+    if (m_image_description->GetLabel() == label_text) return;
     m_image_description->SetLabel(label_text);
 
     try {
         m_description_icon_bitmap = ScalableBitmap(this, "dev_ams_dry_ctr_heating_icon", 20);
         m_description_icon_bitmap.msw_rescale();
         m_image_description_icon->SetBitmap(m_description_icon_bitmap.bmp());
-        m_image_description_icon->Show(true);
+        m_image_description_icon->Show(status == DevAms::DryStatus::Drying);
     } catch (Exception&) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " Error loading drying icon";
         m_image_description_icon->Show(false);
@@ -1150,6 +1250,7 @@ void AMSDryCtrWin::update_img_description(DevAms::DryStatus status, DevAms::DryS
 
 int AMSDryCtrWin::update_image(DevAmsType model, DevAms::DryStatus status, DevAms::DrySubStatus sub_status, int humidity_percent)
 {
+    update_img_description(status, sub_status);
     if (model == m_ams_info.m_model && status == m_ams_info.m_dry_status
         && sub_status == m_ams_info.m_dry_sub_status && humidity_percent == m_ams_info.m_humidity_percent) {
         return 0;
@@ -1163,9 +1264,7 @@ int AMSDryCtrWin::update_image(DevAmsType model, DevAms::DryStatus status, DevAm
         img_path = get_dry_status_img_path(model, status, sub_status);
     }
 
-    if (img_path.empty()) {
-        return 0;
-    }
+    if (img_path.empty()) img_path = get_humidity_level_img_path(humidity_percent);
 
     m_humidity_image = ScalableBitmap(this, img_path, AMS_DRY_STATUS_IMAGE_SIZE);
     m_humidity_img->SetBitmap(m_humidity_image.bmp());
@@ -1204,7 +1303,12 @@ bool AMSDryCtrWin::check_values_changed(DevAms* dev_ams)
 
 void AMSDryCtrWin::update_normal_description(DevAms* dev_ams)
 {
-    if (m_tray_ids.empty() || m_trays_combo->GetSelection() >= m_tray_ids.size()) { return; }
+    if (m_tray_ids.empty() || m_trays_combo->GetSelection() < 0 ||
+        m_trays_combo->GetSelection() >= static_cast<int>(m_tray_ids.size())) {
+        m_next_button->Disable();
+        m_start_button->Disable();
+        return;
+    }
 
     FilamentBaseInfo info = m_tray_ids[m_trays_combo->GetSelection()];
     wxString warning_text;
@@ -1239,7 +1343,9 @@ void AMSDryCtrWin::update_normal_description(DevAms* dev_ams)
         }
     }
 
-    if (m_printer_status.m_is_printing && temp_val  > m_ams_info.m_recommand_dry_temp) {
+    const bool has_fed_filament = std::any_of(dev_ams->GetTrays().begin(), dev_ams->GetTrays().end(),
+        [](const auto& item) { return item.second && item.second->is_exists; });
+    if (has_fed_filament && m_printer_status.m_is_printing && temp_val > m_ams_info.m_recommand_dry_temp) {
         warning_text += _L("This AMS is currently printing. To ensure print quality, the drying temperature cannot exceed the recommended drying temperature.") + "\n";
         can_enable_button = false;
     } else if (preset.has_value()) {
@@ -1274,13 +1380,21 @@ void AMSDryCtrWin::update_normal_description(DevAms* dev_ams)
     const auto* owner = fila_system ? fila_system->GetOwner() : nullptr;
     if (owner && !owner->is_support_remote_dry) {
         // Keep the existing material limits and interlocks for the compatibility path.
-        warning_text += _L("Print & Dry: drying can be started during printing within the loaded filament limits. Verify heating on the AMS display; spool rotation is disabled.") + "\n";
-        if (!fila_system->GetOwner()->is_connected() || fila_system->GetOwner()->is_in_calibration())
+        warning_text += _L("Experimental drying during printing: X1C firmware support is not confirmed. The printer may reject the request. Verify heating on the AMS display. Spool rotation is disabled.") + "\n";
+        if (!fila_system->GetOwner()->is_connected()) {
+            warning_text += _L("Start blocked: printer disconnected.") + "\n";
             can_enable_button = false;
+        }
+        if (fila_system->GetOwner()->is_in_calibration()) {
+            warning_text += _L("Start blocked: printer calibration is running.") + "\n";
+            can_enable_button = false;
+        }
         long ams_id = -1;
         if (!wxString::FromUTF8(m_ams_info.m_ams_id.c_str()).ToLong(&ams_id) ||
             !fila_system->IsPrintDryTemperatureAllowed(static_cast<int>(ams_id), static_cast<int>(temp_val))) {
-            warning_text += _L("Print & Dry requires known loaded filament and a temperature within its printing, softening and heat-distortion limits.") + "\n";
+            const auto limit = fila_system->GetPrintDryTemperatureLimit(static_cast<int>(ams_id));
+            warning_text += limit ? wxString::Format(_L("Start blocked: the loaded filament permits at most %d °C during printing."), *limit) + "\n" :
+                _L("Start blocked: drying limits for the filament reported by the AMS are missing. The dropdown selection does not change the AMS material. Check its material assignment, or wait until the print has finished.") + "\n";
             can_enable_button = false;
         }
     }
@@ -1570,12 +1684,22 @@ void AMSDryCtrWin::update_filament_guide_info(DevAms* dev_ams)
         DevFilamentDryingPreset preset;
         if (filament_type.IsEmpty()) {
             auto fallback_preset = DevUtilBackend::GetFilamentDryingPreset("GFA00");
+            if (!fallback_preset) {
+                can_start = false;
+                m_ams_filament_panel->AddFilamentItem("?", "dev_ams_dry_ctr_disable");
+                continue;
+            }
             preset = fallback_preset.value();
             filament_type = "?";
         } else if (preset_opt.has_value()) {
             preset = preset_opt.value();
         } else {
             auto fallback_preset = DevUtilBackend::GetFilamentDryingPreset("GFA00");
+            if (!fallback_preset) {
+                can_start = false;
+                m_ams_filament_panel->AddFilamentItem("?", "dev_ams_dry_ctr_disable");
+                continue;
+            }
             preset = fallback_preset.value();
         }
         std::string icon_path = "dev_ams_dry_ctr_enable";
@@ -1603,7 +1727,7 @@ void AMSDryCtrWin::update_filament_guide_info(DevAms* dev_ams)
         m_guide_description_label->Wrap(FromDIP(300));
     }
 
-    m_start_button->Enable(can_start);
+    m_start_button->Enable(can_start && m_next_button->IsEnabled());
     m_guide_page->Layout();
     m_guide_page->Thaw();
 }
@@ -1852,10 +1976,13 @@ void AMSDryCtrWin::update(std::shared_ptr<DevFilaSystem> fila_system, MachineObj
         dev_ams->GetDrySubStatus().has_value()? dev_ams->GetDrySubStatus().value(): DevAms::DrySubStatus::Off,
         dev_ams->GetHumidityPercent());
 
+    m_user_profiles->Enable(is_dry_ctr_idle(dev_ams));
     update_state(dev_ams);
     update_dryness_status(dev_ams);
+    if (!dev_ams->GetDryStatus()) m_image_description->SetLabel(_L("Unknown drying status"));
 
     update_filament_list(dev_ams, obj);
+    if (is_dry_ctr_idle(dev_ams)) update_normal_description(dev_ams);
     update_filament_guide_info(dev_ams);
 
     m_is_ams_changed = false;

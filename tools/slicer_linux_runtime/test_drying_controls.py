@@ -21,6 +21,7 @@ prelude = r'''
 #include <stdexcept>
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 #include <limits>
 using nlohmann::json;
 enum class DevAmsType { AMS, N3F, N3S };
@@ -68,6 +69,7 @@ struct DevFilaSystem {
     MachineObject* m_owner;
     DevAms* ams;
     DevAms* GetAmsById(const std::string& id) const { return id == "128" ? ams : nullptr; }
+    std::optional<int> GetPrintDryTemperatureLimit(int) const;
     bool IsPrintDryTemperatureAllowed(int, int) const;
     int CtrlAmsStartDryingHour(int, std::string, int, int, bool, int, bool = false) const;
     int CtrlAmsStopDrying(int) const;
@@ -141,7 +143,7 @@ int main() {
         DevAms ht; DevFilaSystem system{&printer, &ht};
         int temp = 80;
         switch (scenario) {
-        case 0: ht.tray.is_exists = false; break;
+        case 0: ht.tray.preset->filament_dev_ams_drying_temperature_on_print[DevAmsType::N3S] = std::numeric_limits<float>::infinity(); break;
         case 1: ht.tray.ready = false; break;
         case 2: ht.tray.preset.reset(); break;
         case 3: ht.tray.preset->filament_dev_ams_drying_temperature_on_print.clear(); break;
@@ -155,6 +157,15 @@ int main() {
         }
         require(system.CtrlAmsStartDryingHour(128, "PA-CF", temp, 8, false, 40) == -1);
         require(printer.calls == 0); ++tests;
+    }
+    for (bool paused : {false, true}) {
+        MachineObject printer; printer.printing = !paused; printer.paused = paused;
+        DevAms ht; ht.tray.is_exists = false; ht.tray.preset.reset();
+        DevFilaSystem system{&printer, &ht};
+        require(system.GetPrintDryTemperatureLimit(128) == 85);
+        require(system.CtrlAmsStartDryingHour(128, "PA-CF", 85, 12, false, 40) == 0); ++tests;
+        ht.reasons = std::vector<int>{1};
+        require(system.CtrlAmsStartDryingHour(128, "PA-CF", 85, 12, false, 40) == -1); ++tests;
     }
     std::cout << tests << " drying control cases passed\n";
 }

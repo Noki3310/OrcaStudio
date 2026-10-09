@@ -1774,6 +1774,7 @@ bool PrinterPartsDialog::Show(bool show)
             }
         }
 
+        UpdateNozzleInfo();
         Layout();
         Fit();
     }
@@ -1878,6 +1879,13 @@ void PrinterPartsDialog::UpdateNozzleInfo(){
     nozzle_type_checkbox->Enable(editable);
     nozzle_diameter_checkbox->Enable(editable);
     m_apply_nozzle_button->Enable(editable);
+    m_apply_nozzle_button->Show(editable);
+    change_nozzle_tips->Show(!editable);
+    if (obj->printer_type == "BL-P001" || obj->printer_type == "3DPrinter-X1-Carbon")
+        change_nozzle_tips->SetLabel(!obj->is_connected() ? _L("Connect the printer to change nozzle settings.") :
+            _L("Nozzle settings can be changed after printing and calibration have finished."));
+    else change_nozzle_tips->SetLabel(_L("Please change the nozzle settings on the printer."));
+    Layout();
     // Periodic device updates must not discard an unsubmitted selection.
     if (m_nozzle_selection_dirty && editable) return;
     m_nozzle_selection_dirty = false;

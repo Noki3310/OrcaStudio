@@ -1,7 +1,7 @@
 # X1C controls test build
 
 Based on p6 plus the HTTP polling-abort fix. Windows artifact names end in
-`-x1c-controls` to distinguish this installer from the HTTP-only build.
+`-x1c-controls-de2` to distinguish this installer from the HTTP-only build.
 
 ## Nozzle settings
 
@@ -22,10 +22,11 @@ Existing filament temperature limits and reported interlocks remain in effect.
 The compatibility gate is intentionally restricted to X1 Carbon firmware
 01.09.01.00 with AMS HT (N3S). A real drying-status report is required before
 opening the controls. The firmware's remote-drying capability bit is not changed.
-Print & Dry is enabled on this legacy path: Start is also available during a
+Experimental drying requests during printing are enabled on this legacy path.
+X1C firmware support is NOT confirmed. Start is available during a
 print or pause when every loaded tray has a known drying preset and the requested
-temperature meets its on-print, softening and heat-distortion limits. Empty or
-unknown material blocks Print & Dry. Calibration, reported interlocks, spool
+temperature meets its on-print, softening and heat-distortion limits. An empty feeder does not block standalone spool drying. Unknown material in an
+occupied feeder still blocks the print-time request. Calibration, reported interlocks, spool
 rotation and power-conflict override remain blocked. Stop remains available
 while printing. Use the existing Start/Stop buttons; no separate firmware command
 or automatic restart when the firmware stops drying is introduced. Actual
@@ -47,7 +48,7 @@ only the UI. The printer and original heating/safety controls remain required.
 `python3 tools/slicer_linux_runtime/test_nozzle_settings.py` compiles the actual
 nozzle-command body against a fake publisher (26 cases).
 `python3 tools/slicer_linux_runtime/test_drying_controls.py` compiles the actual
-capability gate and drying-command bodies against fake devices (45 cases).
+capability gate and drying-command bodies against fake devices (49 cases).
 These run in CI with the existing 15 HTTP and 6 dispatcher tests and transport
 verification before the full Windows build. They do not test real firmware,
 electrical hardware, or GUI rendering.
@@ -60,4 +61,36 @@ Also verify disconnects/calibration block new starts and rejection gives a messa
 For Print & Dry, start a print with an identified heat-resistant filament, open
 the HT drying dialog and choose a temperature within its print limits. Verify
 that both feeding and heating continue on the real device; then test Stop.
-Unknown material and temperatures above any material limit must block Start.
+Unknown material in an occupied feeder and temperatures above its material
+limits must block Start. An unoccupied feeder must allow standalone drying,
+including while a print uses another source, subject to reported interlocks.
+
+
+## German UI and user profiles (de2)
+
+Completed 420 previously empty German catalog entries and 50 source/UI additions.
+The general Start translation no longer says Start calibration. Drying buttons
+explicitly say Start drying. Nozzle controls explain print/calibration/disconnect
+locks and refresh their visibility without reopening the dialog.
+
+Drying labels update independently of graphics. Active drying with an absent or
+unknown substatus remains Drying; cooling, stopping, errors and unknown states
+are distinct. Temperature alone never implies heating. The dialog is resizable,
+and hours use a translated label with a non-collapsing input field.
+
+Own drying profiles save a name, material ID, temperature and hours in AppConfig.
+Select a material and values, use Save profile as; reusing the name updates after
+confirmation, a new name creates a copy. Delete requires confirmation. Loading
+never sends a command or changes the AMS material assignment. Existing command
+limits are rechecked on Start. Profiles whose material is unavailable cannot load.
+
+Hardware feedback on 2026-10-09: user confirmed Stop in Orca ended drying started
+on the printer. Start remains unconfirmed; the disabled button in the screenshot
+was a local print-time material guard, not evidence of firmware rejection.
+
+Validation: 12 compiled production status-label transitions, 49 command cases,
+26 nozzle cases and gettext format/coverage checks. Full GUI rendering, profile
+persistence after restarting Orca, and device behavior need installer acceptance.
+Test profile create/load/update/delete with German names, confirm settings survive
+restart, check unknown/over-limit feedstock remains blocked, and test the empty
+feeder while printing elsewhere. No firmware capability is fabricated.

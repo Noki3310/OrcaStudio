@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include <cmath>
+#include <algorithm>
 #include "DevFilaSystem.h"
 
 #include "slic3r/GUI/DeviceManager.hpp"// TODO: remove this include
@@ -59,26 +60,34 @@ bool DevFilaSystem::IsPrintDryTemperatureAllowed(int ams_id, int temperature) co
 {
     if (!m_owner) return false;
     if (!m_owner->is_in_printing() && !m_owner->is_in_printing_pause()) return true;
+    const auto limit = GetPrintDryTemperatureLimit(ams_id);
+    return limit && temperature <= *limit;
+}
+
+std::optional<int> DevFilaSystem::GetPrintDryTemperatureLimit(int ams_id) const
+{
     const auto* ams = GetAmsById(std::to_string(ams_id));
-    if (!ams) return false;
-    bool has_material = false;
+    if (!ams) return std::nullopt;
+    if (ams->GetTrays().empty()) return std::nullopt;
+    int maximum = ams->GetAmsType() == DevAmsType::N3S ? 85 : 65;
     for (const auto& entry : ams->GetTrays()) {
         const auto* tray = entry.second;
-        if (!tray) return false;
+        if (!tray) return std::nullopt;
         if (!tray->is_exists) continue;
-        has_material = true;
-        if (!tray->is_tray_info_ready()) return false;
+        if (!tray->is_tray_info_ready()) return std::nullopt;
         const auto preset = tray->get_ams_drying_preset();
-        if (!preset) return false;
+        if (!preset) return std::nullopt;
         const auto limit = preset->filament_dev_ams_drying_temperature_on_print.find(ams->GetAmsType());
-        if (limit == preset->filament_dev_ams_drying_temperature_on_print.end()) return false;
+        if (limit == preset->filament_dev_ams_drying_temperature_on_print.end()) return std::nullopt;
         for (float value : {limit->second, preset->filament_dev_drying_softening_temperature,
                            preset->filament_dev_ams_drying_heat_distortion_temperature}) {
-            if (!std::isfinite(value) || value <= 0 || temperature > value) return false;
+            if (!std::isfinite(value) || value <= 0) return std::nullopt;
+            maximum = std::min(maximum, static_cast<int>(std::floor(std::min(value, 85.0f))));
         }
     }
-    // Unknown/empty material must not silently inherit the selected UI preset.
-    return has_material;
+    // A spool may be inside the dryer without filament in the feeder. In that
+    // case there is no fed filament to protect with print-time temperature limits.
+    return maximum;
 }
 
 int DevFilaSystem::CtrlAmsStopDrying(int ams_id) const

@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <optional>
+#include <wx/choice.h>
 
 
 //Previous defintions
@@ -124,6 +125,11 @@ private:
     Label* m_cannot_dry_description_label = nullptr;
 
     // right panel normal state
+    wxChoice* m_user_profiles{nullptr};
+    void reload_user_profiles();
+    void load_user_profile();
+    void save_user_profile();
+    void delete_user_profile();
     ComboBox* m_trays_combo;
     std::vector<FilamentBaseInfo> m_tray_ids;
     wxTextCtrl* m_temperature_input;
