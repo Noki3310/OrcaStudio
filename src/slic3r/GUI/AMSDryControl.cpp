@@ -1274,10 +1274,15 @@ void AMSDryCtrWin::update_normal_description(DevAms* dev_ams)
     const auto* owner = fila_system ? fila_system->GetOwner() : nullptr;
     if (owner && !owner->is_support_remote_dry) {
         // Keep the existing material limits and interlocks for the compatibility path.
-        warning_text += _L("Remote drying on this firmware must be verified on the AMS display. Start is available only while the printer is idle; spool rotation is disabled.") + "\n";
-        if (!fila_system->GetOwner()->is_connected() || fila_system->GetOwner()->is_in_printing() ||
-            fila_system->GetOwner()->is_in_printing_pause() || fila_system->GetOwner()->is_in_calibration())
+        warning_text += _L("Print & Dry: drying can be started during printing within the loaded filament limits. Verify heating on the AMS display; spool rotation is disabled.") + "\n";
+        if (!fila_system->GetOwner()->is_connected() || fila_system->GetOwner()->is_in_calibration())
             can_enable_button = false;
+        long ams_id = -1;
+        if (!wxString::FromUTF8(m_ams_info.m_ams_id.c_str()).ToLong(&ams_id) ||
+            !fila_system->IsPrintDryTemperatureAllowed(static_cast<int>(ams_id), static_cast<int>(temp_val))) {
+            warning_text += _L("Print & Dry requires known loaded filament and a temperature within its printing, softening and heat-distortion limits.") + "\n";
+            can_enable_button = false;
+        }
     }
     m_next_button->Enable(can_enable_button);
     m_start_button->Enable(can_enable_button);

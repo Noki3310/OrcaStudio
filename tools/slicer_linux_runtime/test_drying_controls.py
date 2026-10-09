@@ -20,6 +20,8 @@ prelude = r'''
 #include <vector>
 #include <stdexcept>
 #include <iostream>
+#include <cmath>
+#include <limits>
 using nlohmann::json;
 enum class DevAmsType { AMS, N3F, N3S };
 struct MachineObject {
@@ -37,9 +39,22 @@ struct MachineObject {
     int publish_json(const json& j) { ++calls; sent = j; return result; }
 };
 int MachineObject::m_sequence_id = 0;
+struct DevFilamentDryingPreset {
+    std::map<DevAmsType, float> filament_dev_ams_drying_temperature_on_print{{DevAmsType::N3S, 80}};
+    float filament_dev_drying_softening_temperature = 90;
+    float filament_dev_ams_drying_heat_distortion_temperature = 85;
+};
+struct Tray {
+    bool is_exists = true, ready = true;
+    std::optional<DevFilamentDryingPreset> preset{DevFilamentDryingPreset{}};
+    bool is_tray_info_ready() const { return ready; }
+    auto get_ams_drying_preset() const { return preset; }
+};
 struct DevAms {
     enum class DryCtrlMode { Off = 0, OnTime = 1 };
     enum class DryStatus { Off, Checking, Drying, Cooling };
+    Tray tray;
+    std::map<std::string, Tray*> GetTrays() const { return {{"0", const_cast<Tray*>(&tray)}}; }
     DevAmsType type = DevAmsType::N3S;
     std::optional<DryStatus> status{DryStatus::Off};
     std::optional<std::vector<int>> reasons{std::vector<int>{}};
@@ -53,6 +68,7 @@ struct DevFilaSystem {
     MachineObject* m_owner;
     DevAms* ams;
     DevAms* GetAmsById(const std::string& id) const { return id == "128" ? ams : nullptr; }
+    bool IsPrintDryTemperatureAllowed(int, int) const;
     int CtrlAmsStartDryingHour(int, std::string, int, int, bool, int, bool = false) const;
     int CtrlAmsStopDrying(int) const;
 };
@@ -79,8 +95,8 @@ int main() {
         int id = 128, temp = 80, hours = 8; bool rotate = false, override_power = false;
         switch (scenario) {
         case 0: m.connected = false; break;
-        case 1: m.printing = true; break;
-        case 2: m.paused = true; break;
+        case 1: m.printing = true; a.tray.preset.reset(); break;
+        case 2: m.paused = true; a.tray.preset.reset(); break;
         case 3: m.calibrating = true; break;
         case 4: m.module_vers.clear(); break;
         case 5: m.module_vers["ota"].sw_ver = "01.08.02.00"; break;
@@ -113,6 +129,33 @@ int main() {
     require(a.IsSupportRemoteDry(&m));
     require(f.CtrlAmsStartDryingHour(128, "PETG", 65, 12, true, 40) == 0); ++tests;
     require(f.CtrlAmsStartDryingHour(128, "PETG", 66, 12, false, 40) == -1); ++tests;
+    for (bool paused : {false, true}) {
+        MachineObject printer; printer.printing = !paused; printer.paused = paused;
+        DevAms ht; DevFilaSystem system{&printer, &ht};
+        require(system.CtrlAmsStartDryingHour(128, "PA-CF", 80, 8, false, 40) == 0);
+        require(printer.sent.at("print").at("rotate_tray") == false); ++tests;
+        require(system.CtrlAmsStopDrying(128) == 0); ++tests;
+    }
+    for (int scenario = 0; scenario < 11; ++scenario) {
+        MachineObject printer; printer.printing = true;
+        DevAms ht; DevFilaSystem system{&printer, &ht};
+        int temp = 80;
+        switch (scenario) {
+        case 0: ht.tray.is_exists = false; break;
+        case 1: ht.tray.ready = false; break;
+        case 2: ht.tray.preset.reset(); break;
+        case 3: ht.tray.preset->filament_dev_ams_drying_temperature_on_print.clear(); break;
+        case 4: ht.tray.preset->filament_dev_ams_drying_temperature_on_print[DevAmsType::N3S] = 0; break;
+        case 5: temp = 81; break;
+        case 6: ht.tray.preset->filament_dev_drying_softening_temperature = 75; break;
+        case 7: ht.tray.preset->filament_dev_ams_drying_heat_distortion_temperature = 75; break;
+        case 8: ht.tray.preset->filament_dev_drying_softening_temperature = std::numeric_limits<float>::quiet_NaN(); break;
+        case 9: ht.reasons = std::vector<int>{1}; break;
+        case 10: printer.calibrating = true; break;
+        }
+        require(system.CtrlAmsStartDryingHour(128, "PA-CF", temp, 8, false, 40) == -1);
+        require(printer.calls == 0); ++tests;
+    }
     std::cout << tests << " drying control cases passed\n";
 }
 '''

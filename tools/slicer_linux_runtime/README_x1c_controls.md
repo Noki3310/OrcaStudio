@@ -22,9 +22,14 @@ Existing filament temperature limits and reported interlocks remain in effect.
 The compatibility gate is intentionally restricted to X1 Carbon firmware
 01.09.01.00 with AMS HT (N3S). A real drying-status report is required before
 opening the controls. The firmware's remote-drying capability bit is not changed.
-On this legacy path, starting is limited to an idle printer without calibration;
-spool rotation and power-conflict override are disabled. Stop remains available
-while printing. The regular capability-advertised path remains supported.
+Print & Dry is enabled on this legacy path: Start is also available during a
+print or pause when every loaded tray has a known drying preset and the requested
+temperature meets its on-print, softening and heat-distortion limits. Empty or
+unknown material blocks Print & Dry. Calibration, reported interlocks, spool
+rotation and power-conflict override remain blocked. Stop remains available
+while printing. Use the existing Start/Stop buttons; no separate firmware command
+or automatic restart when the firmware stops drying is introduced. Actual
+simultaneous printing and heating still need confirmation on X1C hardware. The regular capability-advertised path remains supported.
 
 The wire command is the existing `print.ams_filament_drying` implementation.
 Independent reference: https://github.com/maziggy/bambuddy, functions
@@ -42,7 +47,7 @@ only the UI. The printer and original heating/safety controls remain required.
 `python3 tools/slicer_linux_runtime/test_nozzle_settings.py` compiles the actual
 nozzle-command body against a fake publisher (26 cases).
 `python3 tools/slicer_linux_runtime/test_drying_controls.py` compiles the actual
-capability gate and drying-command bodies against fake devices (30 cases).
+capability gate and drying-command bodies against fake devices (45 cases).
 These run in CI with the existing 15 HTTP and 6 dispatcher tests and transport
 verification before the full Windows build. They do not test real firmware,
 electrical hardware, or GUI rendering.
@@ -51,4 +56,8 @@ Manual acceptance is still required: install the new installer; check 0.6 mm
 Apply against the printer display and refreshed print dialog; open AMS HT drying,
 choose material-appropriate settings, start and verify heating on the AMS display,
 then Stop and verify the real device changes state (cooldown may continue).
-Also verify disconnects/printing block new starts and rejection gives a message.
+Also verify disconnects/calibration block new starts and rejection gives a message.
+For Print & Dry, start a print with an identified heat-resistant filament, open
+the HT drying dialog and choose a temperature within its print limits. Verify
+that both feeding and heating continue on the real device; then test Stop.
+Unknown material and temperatures above any material limit must block Start.
