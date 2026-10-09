@@ -260,6 +260,7 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
             if (dev) {
                 obj = dev->get_selected_machine();
             }
+            const auto* ams = obj ? obj->GetFilaSystem()->GetAmsById(info->ams_id) : nullptr;
 
             if (info->ams_type == AMSModel::GENERIC_AMS)
             {
@@ -270,7 +271,8 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
                 int humidity_value = info->humidity_display_idx;
                 if (humidity_value > 0 && humidity_value <= 5) { m_Humidity_tip_popup.set_humidity_level(humidity_value); }
                 m_Humidity_tip_popup.Popup();
-            } else if (obj && obj->is_support_remote_dry && (info->ams_type == AMSModel::N3F_AMS || info->ams_type == AMSModel::N3S_AMS)){
+            } else if (ams && ams->IsSupportRemoteDry(obj) && ams->GetDryStatus().has_value() &&
+                       (info->ams_type == AMSModel::N3F_AMS || info->ams_type == AMSModel::N3S_AMS)){
                 m_ams_dry_ctr_win->set_ams_id(info->ams_id);
 
                 wxPoint img_pos = ClientToScreen(wxPoint(0, 0));

@@ -1814,6 +1814,25 @@ int MachineObject::command_set_nozzle_new(int nozzle_id, int temp)
     return this->publish_json(j, 1);
 }
 
+int MachineObject::command_set_printer_nozzle(std::string nozzle_type, float diameter)
+{
+    // Restore the legacy OrcaSlicer set_accessories command for X1C only.
+    // Publishing is not an acknowledgement: never overwrite device-reported state.
+    if ((printer_type != "BL-P001" && printer_type != "3DPrinter-X1-Carbon") ||
+        !is_connected() || is_in_printing() || is_in_printing_pause() || is_in_calibration() ||
+        (nozzle_type != "hardened_steel" && nozzle_type != "stainless_steel") ||
+        (diameter != 0.2f && diameter != 0.4f && diameter != 0.6f && diameter != 0.8f))
+        return -1;
+
+    json j;
+    j["system"]["command"] = "set_accessories";
+    j["system"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+    j["system"]["accessory_type"] = "nozzle";
+    j["system"]["nozzle_type"] = nozzle_type;
+    j["system"]["nozzle_diameter"] = diameter;
+    return publish_json(j);
+}
+
 int MachineObject::command_refresh_nozzle(){
     json j;
     j["print"]["sequence_id"]    = std::to_string(MachineObject::m_sequence_id++);

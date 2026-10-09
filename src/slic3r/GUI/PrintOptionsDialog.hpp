@@ -37,6 +37,8 @@ protected:
     Label    *change_nozzle_tips;
     HyperLink* m_wiki_link;
     Button* m_single_update_nozzle_button;
+    Button* m_apply_nozzle_button;
+    bool m_nozzle_selection_dirty{false};
     Button* m_multiple_update_nozzle_button;
 
     ComboBox* multiple_left_nozzle_type_checkbox;
@@ -66,6 +68,8 @@ private:
     void  EnableEditing(bool enable);
     void  OnWikiClicked(wxMouseEvent& e);
     void  OnNozzleRefresh(wxCommandEvent& e);
+    void  OnNozzleApply(wxCommandEvent& e);
+    bool  CanEditNozzle();
 
     wxString GetString(NozzleType nozzle_type) const;
     wxString GetString(NozzleFlowType nozzle_flow_type) const;

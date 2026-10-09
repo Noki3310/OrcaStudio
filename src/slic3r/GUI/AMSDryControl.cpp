@@ -528,7 +528,13 @@ wxBoxSizer* AMSDryCtrWin::create_normal_state_panel(wxPanel* parent)
             return;
         }
 
-        fila_system->CtrlAmsStopDrying(std::stoi(m_ams_info.m_ams_id));
+        long ams_id = -1;
+        if (!wxString::FromUTF8(m_ams_info.m_ams_id.c_str()).ToLong(&ams_id) || ams_id < 0 || ams_id > 255 ||
+            fila_system->CtrlAmsStopDrying(static_cast<int>(ams_id)) != 0) {
+            wxMessageBox(_L("Could not send the drying stop request. Check the connection and printer status."),
+                         _L("AMS Drying"), wxOK | wxICON_ERROR, this);
+            return;
+        }
         // Temporarily show stopping state, then restore after 2 seconds
         if (m_stop_button) {
             m_stop_button->SetLabel(_L("Stopping"));
@@ -757,12 +763,16 @@ wxBoxSizer* AMSDryCtrWin::create_guide_right_section(wxPanel* parent)
     );
 
     m_start_button->Bind(wxEVT_COMMAND_BUTTON_CLICKED, [this](wxCommandEvent& event) {
+        if (!start_sending_drying_command()) {
+            wxMessageBox(_L("Could not start drying. Check the connection, printer status, temperature and time."),
+                         _L("AMS Drying"), wxOK | wxICON_ERROR, this);
+            return;
+        }
         m_main_simplebook->SetSelection(2);
         m_progress_gauge->SetValue(0);
 
         m_progress_timer->Start(70);
         m_progress_value = 0;
-        start_sending_drying_command();
     });
 
     buttons_container->Add(m_start_button, 0, wxALL, FromDIP(5));
@@ -785,25 +795,25 @@ wxBoxSizer* AMSDryCtrWin::create_guide_page_sizer(wxPanel* parent)
     return guide_sizer;
 }
 
-void AMSDryCtrWin::start_sending_drying_command()
+bool AMSDryCtrWin::start_sending_drying_command()
 {
     auto fila_system = get_fila_system();
     if (!fila_system) {
         BOOST_LOG_TRIVIAL(info) << "AMSDryCtrWin::start_sending_drying_command: Invalid FilaSystem Pointer";
-        return;
+        return false;
     }
 
     if (m_temperature_input->GetValue().IsEmpty() || m_time_input->GetValue().IsEmpty()) {
         // Show error message to user
         BOOST_LOG_TRIVIAL(info) << "AMSDryCtrWin::start_sending_drying_command: Time or temperature is empty";
-        return;
+        return false;
     }
 
     long temperature, time;
     if (!m_temperature_input->GetValue().ToLong(&temperature) ||
         !m_time_input->GetValue().ToLong(&time)) {
         BOOST_LOG_TRIVIAL(info) << "AMSDryCtrWin::start_sending_drying_command: Failed to convert temperature or time";
-        return;
+        return false;
     }
 
     int tray_index;
@@ -811,8 +821,16 @@ void AMSDryCtrWin::start_sending_drying_command()
     if (m_tray_ids.empty() || tray_index < 0 || tray_index >= m_tray_ids.size()) {
         BOOST_LOG_TRIVIAL(warning) << "AMSDryCtrWin::start_sending_drying_command: Invalid tray_index " << tray_index
                                    << ", m_tray_ids.size=" << m_tray_ids.size();
-        return;
+        return false;
     }
+
+    auto* ams = fila_system->GetAmsById(m_ams_info.m_ams_id);
+    if (!ams) return false;
+    update_normal_description(ams);
+    if (!m_next_button->IsEnabled()) return false;
+    long ams_id = -1;
+    if (!wxString::FromUTF8(m_ams_info.m_ams_id.c_str()).ToLong(&ams_id) || ams_id < 0 || ams_id > 255)
+        return false;
 
     int cooling_temp = 50;
     std::optional<DevFilamentDryingPreset> preset = DevUtilBackend::GetFilamentDryingPreset(m_tray_ids[tray_index].filament_id);
@@ -820,13 +838,15 @@ void AMSDryCtrWin::start_sending_drying_command()
         cooling_temp = static_cast<int>(preset.value().filament_dev_drying_softening_temperature);
     }
 
-    fila_system->CtrlAmsStartDryingHour(std::stoi(m_ams_info.m_ams_id), m_tray_ids[tray_index].filament_type,
-        temperature, time, m_rotate_spool_toggle->GetValue(), cooling_temp, false);
+    if (fila_system->CtrlAmsStartDryingHour(static_cast<int>(ams_id), m_tray_ids[tray_index].filament_type,
+        temperature, time, m_rotate_spool_toggle->GetValue(), cooling_temp, false) != 0)
+        return false;
 
     m_dry_setting.m_filament_names[m_ams_info.m_ams_id] = m_tray_ids[tray_index].filament_name;
     m_dry_setting.m_filament_type[m_ams_info.m_ams_id] = m_tray_ids[tray_index].filament_type;
     m_dry_setting.m_dry_temp[m_ams_info.m_ams_id] = temperature;
     m_dry_setting.m_dry_time[m_ams_info.m_ams_id] = time;
+    return true;
 }
 
 void AMSDryCtrWin::OnProgressTimer(wxTimerEvent& event)
@@ -850,6 +870,14 @@ void AMSDryCtrWin::OnProgressTimer(wxTimerEvent& event)
         }
     }
 
+    if (m_progress_value >= 430 && is_dry_ctr_idle()) {
+        m_progress_timer->Stop();
+        m_progress_value = 0;
+        m_main_simplebook->SetSelection(0);
+        wxMessageBox(_L("The printer has not confirmed that drying started. Check the AMS display. This firmware may not accept remote drying commands."),
+                     _L("AMS Drying"), wxOK | wxICON_WARNING, this);
+        return;
+    }
     if (m_progress_value >= 100 && !is_dry_ctr_idle()) {
         m_progress_value = 0;
         m_progress_timer->Stop();
@@ -1242,7 +1270,17 @@ void AMSDryCtrWin::update_normal_description(DevAms* dev_ams)
         can_enable_button = false;
     }
 
+    const auto fila_system = get_fila_system();
+    const auto* owner = fila_system ? fila_system->GetOwner() : nullptr;
+    if (owner && !owner->is_support_remote_dry) {
+        // Keep the existing material limits and interlocks for the compatibility path.
+        warning_text += _L("Remote drying on this firmware must be verified on the AMS display. Start is available only while the printer is idle; spool rotation is disabled.") + "\n";
+        if (!fila_system->GetOwner()->is_connected() || fila_system->GetOwner()->is_in_printing() ||
+            fila_system->GetOwner()->is_in_printing_pause() || fila_system->GetOwner()->is_in_calibration())
+            can_enable_button = false;
+    }
     m_next_button->Enable(can_enable_button);
+    m_start_button->Enable(can_enable_button);
     m_normal_description->SetLabel(warning_text);
     m_normal_description->Wrap(FromDIP(250));
     m_normal_description->GetParent()->Layout();
@@ -1784,6 +1822,8 @@ void AMSDryCtrWin::update(std::shared_ptr<DevFilaSystem> fila_system, MachineObj
 
     update_printer_state(obj);
     m_fila_system = fila_system;
+    if (!obj->is_support_remote_dry) m_rotate_spool_toggle->SetValue(false);
+    m_rotate_spool_toggle->Enable(obj->is_support_remote_dry);
 
     DevAms* dev_ams = fila_system->GetAmsById(m_ams_info.m_ams_id);
     if (!dev_ams) {

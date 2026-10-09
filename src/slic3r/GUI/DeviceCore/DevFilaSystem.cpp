@@ -204,7 +204,16 @@ bool DevAms::IsSupportRemoteDry(const MachineObject* obj) const
     if (obj && obj->is_support_remote_dry) {
         return SupportDrying();
     }
-
+    // X1C 01.09.01.00 can report AMS HT drying without advertising the newer
+    // fun2 remote-dry bit. Offer the existing command/UI on this specific legacy
+    // combination; do not fabricate capability bits or device status.
+    // Wire command and status layout also used by maziggy/bambuddy.
+    if (obj && GetAmsType() == DevAmsType::N3S &&
+        (obj->printer_type == "BL-P001" || obj->printer_type == "3DPrinter-X1-Carbon")) {
+        const auto ota = obj->module_vers.find("ota");
+        return ota != obj->module_vers.end() && ota->second.name == "ota" &&
+            ota->second.sw_ver == "01.09.01.00";
+    }
     return false;
 }
 
@@ -587,9 +596,9 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                         curr_ams->m_left_dry_time = (*it)["dry_time"].get<int>();
                     }
 
-                    // Drying status — only parse if printer supports remote drying
-                    if (obj->is_support_remote_dry) {
-                        if (it->contains("info")) {
+                    // Also read genuine status from the legacy X1C/AMS HT path.
+                    if (curr_ams->IsSupportRemoteDry(obj)) {
+                        if (it->contains("info") && (*it)["info"].is_string()) {
                             const std::string& info = (*it)["info"].get<std::string>();
                             curr_ams->m_dry_status = (DevAms::DryStatus)DevUtil::get_flag_bits(info, 4, 4);
                             curr_ams->m_dry_fan1_status = (DevAms::DryFanStatus)DevUtil::get_flag_bits(info, 18, 2);

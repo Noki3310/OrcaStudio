@@ -1494,6 +1494,14 @@ PrinterPartsDialog::PrinterPartsDialog(wxWindow* parent)
 
     nozzle_diameter_checkbox = new ComboBox(single_panel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(180), -1), 0, NULL, wxCB_READONLY);
 
+    nozzle_type_checkbox->Append(GetString(ntHardenedSteel));
+    nozzle_type_checkbox->Append(GetString(ntStainlessSteel));
+    for (float diameter : {0.2f, 0.4f, 0.6f, 0.8f})
+        nozzle_diameter_checkbox->Append(format_nozzle_diameter(diameter));
+    auto mark_dirty = [this](wxCommandEvent&) { m_nozzle_selection_dirty = true; };
+    nozzle_type_checkbox->Bind(wxEVT_COMBOBOX, mark_dirty);
+    nozzle_diameter_checkbox->Bind(wxEVT_COMBOBOX, mark_dirty);
+
     line_sizer_nozzle_diameter->Add(nozzle_diameter, 0, wxALIGN_CENTER, 5);
     line_sizer_nozzle_diameter->Add(0, 0, 1, wxEXPAND, 5);
     line_sizer_nozzle_diameter->Add(nozzle_diameter_checkbox, 0, wxALIGN_CENTER, 5);
@@ -1535,6 +1543,13 @@ PrinterPartsDialog::PrinterPartsDialog(wxWindow* parent)
     m_single_update_nozzle_button->Bind(wxEVT_BUTTON, &PrinterPartsDialog::OnNozzleRefresh, this);
     single_update_nozzle_sizer->Add(0, 0, 1, wxEXPAND, FromDIP(0));
     single_update_nozzle_sizer->Add(m_single_update_nozzle_button, 0, wxALIGN_CENTER | wxLEFT | wxRIGHT, FromDIP(18));
+    m_apply_nozzle_button = new Button(single_panel, _L("Apply"));
+    m_apply_nozzle_button->SetBackgroundColor(btn_bg_green);
+    m_apply_nozzle_button->SetTextColor(wxColour("#FFFFFE"));
+    m_apply_nozzle_button->SetMinSize(wxSize(FromDIP(100), FromDIP(32)));
+    m_apply_nozzle_button->Bind(wxEVT_BUTTON, &PrinterPartsDialog::OnNozzleApply, this);
+    m_apply_nozzle_button->Hide();
+    single_update_nozzle_sizer->Add(m_apply_nozzle_button, 0, wxALIGN_CENTER | wxLEFT | wxRIGHT, FromDIP(18));
 
     single_sizer->Add(single_line, 0, wxEXPAND, 0);
     single_sizer->Add(0, 0, 0, wxTOP, FromDIP(15));
@@ -1696,12 +1711,19 @@ void PrinterPartsDialog::update_machine_obj(MachineObject* obj_) { if (obj_) { o
 bool PrinterPartsDialog::Show(bool show)
 {
     if (show) {
+        if (!obj) return false;
+        m_nozzle_selection_dirty = false;
         wxGetApp().UpdateDlgDarkUI(this);
         CentreOnParent();
 
         /*disable editing*/
         EnableEditing(false);
-        assert(DevPrinterConfigUtil::get_printer_can_set_nozzle(obj->printer_type) == false);/*editing is not supported*/
+        const bool editable = CanEditNozzle();
+        nozzle_type_checkbox->Enable(editable);
+        nozzle_diameter_checkbox->Enable(editable);
+        m_apply_nozzle_button->Show(editable);
+        m_apply_nozzle_button->Enable(editable);
+        change_nozzle_tips->Show(!editable);
 
         if (obj->GetExtderSystem()->GetTotalExtderSize() <= 1) {
             single_panel->Show();
@@ -1820,7 +1842,45 @@ void PrinterPartsDialog::OnNozzleRefresh(wxCommandEvent& e)
     obj->command_refresh_nozzle();
 }
 
+bool PrinterPartsDialog::CanEditNozzle()
+{
+    return obj && (obj->printer_type == "BL-P001" || obj->printer_type == "3DPrinter-X1-Carbon") &&
+        obj->GetExtderSystem()->GetTotalExtderSize() == 1 && obj->is_connected() &&
+        !obj->is_in_printing() && !obj->is_in_printing_pause() && !obj->is_in_calibration();
+}
+
+void PrinterPartsDialog::OnNozzleApply(wxCommandEvent& e)
+{
+    if (!CanEditNozzle()) return;
+    const auto* target = obj;
+    const int type = nozzle_type_checkbox->GetSelection();
+    const int diameter = nozzle_diameter_checkbox->GetSelection();
+    if (type < 0 || type > 1 || diameter < 0 || diameter > 3) return;
+    const float diameters[] = {0.2f, 0.4f, 0.6f, 0.8f};
+    const wxString question = _L("Confirm that this matches the nozzle physically installed in the printer:") +
+        "\n\n" + nozzle_type_checkbox->GetValue() + " / " + nozzle_diameter_checkbox->GetValue();
+    if (wxMessageBox(question, _L("Printer Parts"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES)
+        return;
+    // Recheck after the modal confirmation, since printer status may have changed.
+    if (obj != target || !CanEditNozzle()) return;
+    const int result = obj->command_set_printer_nozzle(type == 0 ? "hardened_steel" : "stainless_steel", diameters[diameter]);
+    m_nozzle_selection_dirty = false;
+    UpdateNozzleInfo();
+    wxMessageBox(result == 0
+        ? _L("Nozzle setting request sent. The displayed values come from the printer. Verify that the requested size appears before printing. If it does not, change the setting on the printer display.")
+        : _L("Could not send the nozzle setting. No device settings have been changed locally."),
+        _L("Printer Parts"), wxOK | (result == 0 ? wxICON_INFORMATION : wxICON_ERROR), this);
+}
+
 void PrinterPartsDialog::UpdateNozzleInfo(){
+    if (!obj) return;
+    const bool editable = CanEditNozzle();
+    nozzle_type_checkbox->Enable(editable);
+    nozzle_diameter_checkbox->Enable(editable);
+    m_apply_nozzle_button->Enable(editable);
+    // Periodic device updates must not discard an unsubmitted selection.
+    if (m_nozzle_selection_dirty && editable) return;
+    m_nozzle_selection_dirty = false;
     /* nozzle in checking*/
     if (obj->GetNozzleSystem()->IsRefreshing()) {
         if (single_panel->IsShown()) {

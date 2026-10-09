@@ -24,6 +24,21 @@ int DevFilaSystem::CtrlAmsStartDryingHour(int ams_id,
                                           int cooling_temp,
                                           bool close_power_conflict) const
 {
+    const auto* ams = GetAmsById(std::to_string(ams_id));
+    if (!m_owner || !m_owner->is_connected() || !ams || !ams->IsSupportRemoteDry(m_owner)) return -1;
+    if (tag_duration_hour < 1 || tag_duration_hour > 24 || tag_temp < 45 ||
+        tag_temp > (ams->GetAmsType() == DevAmsType::N3S ? 85 : 65)) return -1;
+    // Legacy compatibility is initially limited to idle drying. Never relax a
+    // reported interlock, force spool rotation or override a power conflict.
+    if (!m_owner->is_support_remote_dry) {
+        if (m_owner->is_in_printing() || m_owner->is_in_printing_pause() || m_owner->is_in_calibration() ||
+            !ams->GetDryStatus().has_value() ||
+            (ams->GetDryStatus().value() != DevAms::DryStatus::Off &&
+             ams->GetDryStatus().value() != DevAms::DryStatus::Cooling) || rotate_tray || close_power_conflict)
+            return -1;
+        const auto reasons = ams->GetCannotDryReason();
+        if (reasons && !reasons->empty()) return -1;
+    }
     json jj_command;
     jj_command["print"]["command"] = "ams_filament_drying";
     jj_command["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
@@ -41,6 +56,8 @@ int DevFilaSystem::CtrlAmsStartDryingHour(int ams_id,
 
 int DevFilaSystem::CtrlAmsStopDrying(int ams_id) const
 {
+    const auto* ams = GetAmsById(std::to_string(ams_id));
+    if (!m_owner || !m_owner->is_connected() || !ams || !ams->IsSupportRemoteDry(m_owner)) return -1;
     json jj_command;
     jj_command["print"]["command"] = "ams_filament_drying";
     jj_command["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);

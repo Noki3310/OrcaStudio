@@ -235,7 +235,7 @@ private:
     void update_printer_state(MachineObject* obj);
 
     std::shared_ptr<DevFilaSystem> get_fila_system() const;
-    void start_sending_drying_command();
+    bool start_sending_drying_command();
     void restore_stop_button_if_deadline_passed();
     void restore_unload_button_if_deadline_passed();
     void update_button_size(Button* button);
