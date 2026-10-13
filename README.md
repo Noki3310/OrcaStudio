@@ -1,178 +1,56 @@
-<div align="center">
+# OrcaStudio · X1C Community Edition
 
-<img alt="OrcaStudio" src="resources/images/BambuStudio_192px.png" width="128" height="128">
+Deutschsprachiger Community-Fork von [OrcaStudio](https://github.com/jarczakpawel/OrcaStudio), gepflegt von **Noki3310**. Schwerpunkt sind die Bedienung des **Bambu Lab X1 Carbon mit Firmware 01.09.01.00**, AMS-HT-Trocknungssteuerung und deutsche Bedienoberflächen.
 
-# OrcaStudio
+**Unabhängiges Community-Projekt. Keine offizielle Veröffentlichung von Bambu Lab, OrcaSlicer oder dem ursprünglichen OrcaStudio-Projekt.**
 
-## Fork of Bambu Studio with OrcaSlicer changes applied.
+## Download
 
-This version restores BambuNetwork support for Bambu Lab printers through the Linux `bambu_networking` component.
+**[Windows-Installer und Versionshinweise](https://github.com/Noki3310/OrcaStudio/releases/tag/v02.08.01.55-x1c-de2-rc1)** · [Installation](docs/INSTALLATION_DE.md) · [Änderungen](CHANGELOG.md) · [Teststand](docs/TESTSTATUS_DE.md) · [English](docs/README_EN.md)
 
-It is not limited to LAN-only mode. It restores the normal Bambu Lab network workflow used by Bambu Studio, including printer monitoring and printing.
+Die erste Veröffentlichung ist eine **Vorabversion (RC1)**. Empfohlen ist die Datei `OrcaStudio_Windows_Installer_V02.08.01.55-x1c-controls-de2.exe`. WSL 2 ist für die Windows-Netzwerkanbindung erforderlich. Für diese Edition werden zunächst nur Windows-Installationsdateien angeboten; macOS und Linux sind nicht als eigene Release-Binaries geprüft.
 
-</div>
+## Was dieser Fork ergänzt
 
-> [!IMPORTANT]
-> This version also fixes a slicer issue that appears when using BMCU with Bambu Lab A1 / A1-mini printers on firmware `01.08.01.00` and `01.08.00.00`.
->
-> Instead of showing an error and blocking the whole slicer, OrcaStudio ignores that error and retries sending the print.
->
-> If an error appears on the printer - stay calm. Wait 5 seconds. The error should disappear by itself and the print should resume.
->
-> If this no longer works, it means that Bambu Lab still does not respect BMCU, does not respect customers who bought their printers, and continues to block BMCU users.
+- Korrektur eines Nullzeigerzugriffs beim Abbruch von HTTP-Abfragen im Linux-Runtime-Forwarder. Der zuvor beim Türöffnen beobachtete Absturz trat nach dem Patch im Nutzertest nicht mehr auf.
+- Düsentyp und Düsendurchmesser für den verbundenen, untätigen X1C wieder im Gerätebereich ändern. Während Druck, Kalibrierung oder fehlender Verbindung gelten Sperren; der Durchflusstyp bleibt nur lesbar.
+- AMS-HT-Trocknung über Orca starten und stoppen, Temperatur und Dauer einstellen, abhängig vom gemeldeten Gerätezustand und den Materialgrenzen.
+- Eigene Trocknungsprofile mit Name, Materialkennung, Temperatur und Stunden speichern, laden, aktualisieren und löschen.
+- Trocknungsstatus besser unterscheiden: Trocknen, Abkühlen, Stoppen, Fehler und unbekannte Zustände. Temperatur allein gilt nicht als Heiznachweis.
+- Deutsche Übersetzungen ergänzt; der Trocknungsbutton heißt nicht mehr „Kalibrierung starten“.
+- Trocknen bei unbesetztem HT-Einzug ermöglichen, soweit Gerätestatus und Schutzbedingungen dies zulassen. Ein unbekanntes Material im belegten Einzug wird dadurch nicht freigegeben.
 
-> [!WARNING]
-> Bambu Lab is limiting local BMCU interoperability through firmware updates.
->
-> About how printer updates remove functions that were available at purchase:
-> [BMCU vs firmware locks](https://github.com/jarczakpawel/BMCU-C-PJARCZAK/blob/main/bmcu-vs-firmware-locks.md)
+Die ursprüngliche Linux-Netzwerkbrücke und WSL-Integration stammen aus dem vorgelagerten OrcaStudio-Projekt. Details zur Herkunft stehen in [AUTHORS.md](AUTHORS.md) und im [bewahrten Upstream-README](docs/upstream/README.md).
 
-## Important note about `bambu_networking` and AGPL
+## Was bestätigt ist und was noch offen ist
 
-OrcaStudio does not ship the closed `bambu_networking` component.
+| Funktion | Stand |
+| --- | --- |
+| Windows-Build einschließlich Installer | GitHub Actions erfolgreich, Quellstand `306d5e6d` |
+| Türöffnungsabsturz nach Patch | Laut Nutzerrückmeldung nicht mehr aufgetreten |
+| Trocknung vom Drucker aus starten und über Orca stoppen | Vom Nutzer bestätigt |
+| Trocknung über Orca starten | Vom Nutzer bestätigt |
+| Trocknung läuft während Druck mit externer Spule/Bypass weiter | Vom Nutzer bestätigt |
+| Gleichzeitig trocknen und aktiv aus demselben HT fördern | **Nicht bestätigt** |
+| Vollständige Abnahme der Profile und aller GUI-Zustände | Noch offen |
+| Standalone-Trocknung bei ausgeschaltetem X1C | **Nicht Bestandteil dieses Forks** |
 
-The application contains the callback/interface code needed to use that component. This code comes directly from the public AGPL v3 Bambu Studio source code.
+Der Legacy-Kompatibilitätspfad ist im Code auf X1C-Firmware **01.09.01.00** und AMS HT (**N3S**) begrenzt. Andere Firmwarestände sind dadurch nicht automatisch unterstützt. Die normale geräteseitig gemeldete Trocknungsunterstützung bleibt bestehen. Es wird keine Druckerfirmware verändert und kein fehlender Status als Erfolg ausgegeben.
 
-In my opinion, the closed `bambu_networking` component is not AGPL-compliant. Bambu Studio is AGPL v3, but its public code downloads, installs, dynamically loads and deeply integrates this closed component through ABI structures, callbacks and runtime control flow.
+## Bedienung
 
-The Linux version of this component is the least problematic path, because it does not require the same Windows/macOS publisher-signature workflow that ties the module to Bambu Lab-signed binaries. On Windows/macOS, Bambu Studio can validate that the module has the same publisher/certificate as the application, with certificate checking enabled by default unless ignored by configuration.
+- **Düse:** Gerät → Drucker-Teile. Nur die tatsächlich eingebaute Düse auswählen und die Rückmeldung des Druckers kontrollieren.
+- **Trocknung:** Im Gerätebereich die Feuchtigkeits-/Trocknungsanzeige des AMS HT öffnen. Material, Temperatur und Stunden auswählen; Start und Stopp beziehen sich auf den ausgewählten HT.
+- **Zoom zur Maus:** Einstellungen → Steuerung → Kamera → „Zum Mausposition zoomen“. Diese Funktion war bereits vorhanden; für diese Veröffentlichung wurde kein Zoom-Patch benötigt.
 
-Bambu Lab should publish the complete corresponding source code for `bambu_networking` under AGPL-compatible terms.
+## Fehler melden und mitarbeiten
 
-Detailed analysis:
-https://github.com/jarczakpawel/OrcaSlicer-bambulab/blob/main/bambu_agpl.md
+[Fehler melden](https://github.com/Noki3310/OrcaStudio/issues/new/choose). Bitte Build, Windows-Version, Drucker-/HT-Firmware, Filamentquelle und konkrete Schritte angeben. Zugangscodes, Tokens, Kontodaten und Seriennummern vor dem Hochladen aus Logs entfernen. [Hinweise zur Mitarbeit](CONTRIBUTING.md).
 
-## Installation
+## Lizenz und Quellcode
 
-### Windows
+Die Anwendung bleibt unter der **GNU AGPL v3** gemäß [LICENSE.txt](LICENSE.txt). Vorhandene Copyright- und Lizenzvermerke bleiben erhalten. Fremdkomponenten haben eigene Lizenzbedingungen; siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Windows requires WSL 2.
+[Exakter Anwendungsquellstand des Installers](https://github.com/Noki3310/OrcaStudio/tree/306d5e6dfec7834ec7fbebd16531b6156d8be657) · [Build und Quellen](docs/BUILD_AND_SOURCE.md) · [Datenschutz und Netzwerk](docs/PRIVACY_DE.md)
 
-Open Command Prompt or PowerShell as Administrator and run:
-
-```bat
-dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-```
-
-Restart Windows, then launch OrcaStudio.
-
-The application imports its own WSL2 runtime named:
-
-```text
-BambuStudio-LinuxRuntime
-```
-
-If WSL 2 does not work, make sure virtualization is enabled in BIOS/UEFI. Depending on the motherboard, this option may be named Intel Virtualization Technology, Intel VT-x, AMD-V, or SVM Mode.
-
-### Linux
-
-Nothing special is required.
-
-Install and run normally.
-
-### macOS
-
-1. Open the downloaded DMG.
-2. Drag `OrcaStudio.app` to the `Applications` folder.
-3. Start OrcaStudio from `Applications`.
-
-On first use, the application will ask to install the local Linux runtime.
-
-The public macOS builds are currently ad-hoc signed because this project does not have an Apple Developer ID certificate and Apple notarization credentials. macOS may therefore display a message that Apple cannot verify the application.
-
-First try Control-clicking `OrcaStudio.app`, selecting **Open**, and confirming **Open**. You can also use **System Settings -> Privacy & Security -> Open Anyway**.
-
-If macOS still blocks the application after it has been copied to `Applications`, run this once in Terminal:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/OrcaStudio.app"
-open "/Applications/OrcaStudio.app"
-```
-
-This removes quarantine only from OrcaStudio. Do not disable Gatekeeper globally.
-
-## Removing the runtime
-
-### Windows
-
-To remove only the WSL runtime used by OrcaStudio:
-
-```bat
-wsl --terminate BambuStudio-LinuxRuntime
-wsl --unregister BambuStudio-LinuxRuntime
-rmdir /s /q "%LOCALAPPDATA%\BambuStudio-LinuxRuntime"
-rmdir /s /q "%APPDATA%\BambuStudio_OrcaSlicer\ota\plugins"
-```
-
-If you do not use WSL for anything else, you can also disable WSL 2:
-
-```bat
-dism.exe /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart
-dism.exe /online /disable-feature /featurename:VirtualMachinePlatform /norestart
-```
-
-Restart Windows after disabling WSL 2.
-
-### Linux
-
-There is no WSL/Lima runtime to remove.
-
-Remove the application package/AppImage and, if needed, remove its user data:
-
-```bash
-rm -rf ~/.config/BambuStudio_OrcaSlicer ~/.cache/BambuStudio_OrcaSlicer ~/.local/share/BambuStudio_OrcaSlicer
-```
-
-### macOS
-
-To remove the local Lima runtime:
-
-```bash
-LIMACTL="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime/lima/bin/limactl"
-if [ -x "$LIMACTL" ]; then
-    "$LIMACTL" stop slicer-linux-runtime 2>/dev/null || true
-    "$LIMACTL" delete -f slicer-linux-runtime 2>/dev/null || true
-elif command -v limactl >/dev/null 2>&1; then
-    limactl stop slicer-linux-runtime 2>/dev/null || true
-    limactl delete -f slicer-linux-runtime 2>/dev/null || true
-fi
-rm -rf "$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
-```
-
-## What was done
-
-* Updated to OrcaSlicer through [commit `d6cb667b894f71f68a180861b549f49258cf3a2a`](https://github.com/OrcaSlicer/OrcaSlicer/commit/d6cb667b894f71f68a180861b549f49258cf3a2a).
-* Restored BambuNetwork support through the Linux `bambu_networking` path.
-* Added Windows WSL2 runtime support.
-* Added macOS Lima runtime support.
-* Fixed macOS runtime integration, including printer connection, file browsing and camera preview.
-* Removed non-portable macOS build-runner `LC_RPATH` entries and added distribution checks for packaged Mach-O files.
-* Added experimental Bambu Lab A2L printer support - it has not been tested.
-* Fixed the issue that appears when using BMCU with A1 / A1-mini printers on firmware `01.08.01.00` and `01.08.00.00`.
-* HMS notifications remain dismissible and never use modal retry-failure dialogs; BMCU print retries can be started again without restarting OrcaStudio.
-* Fixed the known integration issues from this fork.
-
-## **Special thanks**
-
-The macOS version was made possible thanks to support from Daniel Rakowiecki's service.
-
-I have been a huge fan of this channel for many years and I have learned a lot from Daniel. He often repairs difficult service equipment and many other devices that other people often do not attempt to repair or are unable to repair.
-
-Daniel provided the MacBook that made it possible to work on the macOS version, for which I am extremely grateful.
-
-Here is the video showing the repair of the MacBook that was sent to me:
-https://www.youtube.com/watch?v=uC3ySN0Fp0w
-
-This is not an advertisement or a sponsored post. I am writing this freely and voluntarily as a thank you.
-
-## BMCU
-
-I also encourage you to use BMCU.
-
-BMCU firmware is available here:
-https://github.com/jarczakpawel/BMCU-C-PJARCZAK
-
-BMCU Flasher is available here:
-https://github.com/jarczakpawel/BMCU-Flasher
-
+Das proprietäre Bambu-Netzwerkplugin gehört nicht zum offenen Quellcode dieses Forks. Die Upstream-Architektur lädt es bei Bedarf separat. Dieser Fork erteilt dafür keine eigenen Nutzungs- oder Weitergaberechte.

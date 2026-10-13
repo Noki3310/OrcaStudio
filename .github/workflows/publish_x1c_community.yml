@@ -1,0 +1,79 @@
+name: Publish X1C Community RC1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish_x1c_community.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: publish-x1c-community-rc1
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: Noki3310/OrcaStudio
+      TAG: v02.08.01.55-x1c-de2-rc1
+      SOURCE_SHA: 306d5e6dfec7834ec7fbebd16531b6156d8be657
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate original build and release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$REPOSITORY"
+          gh api "repos/$REPOSITORY/actions/runs/37981590537" > /tmp/orca-build.json
+          python3 - <<'PY'
+          import json, os
+          r = json.load(open('/tmp/orca-build.json'))
+          assert r['head_sha'] == os.environ['SOURCE_SHA']
+          assert r['conclusion'] == 'success'
+          assert r['repository']['full_name'] == os.environ['REPOSITORY']
+          PY
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          if gh release view "$TAG" --repo "$REPOSITORY" --json isDraft > /tmp/orca-release.json 2>/dev/null; then
+            python3 -c 'import json; assert json.load(open("/tmp/orca-release.json"))["isDraft"], "Release already public; refuse to replace assets"'
+          fi
+      - name: Download immutable build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-input
+          gh api "repos/$REPOSITORY/actions/artifacts/11649267493/zip" > release-input/installer.zip
+          gh api "repos/$REPOSITORY/actions/artifacts/11641709668/zip" > release-input/rootfs.zip
+      - name: Package installer, source, documentation and notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y p7zip-full
+          python3 tools/release/package_x1c_release.py
+          (cd release-output && sha256sum --check SHA256SUMS.txt)
+      - name: Publish verified assets as community prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease \
+              --title 'OrcaStudio X1C Community Edition · RC1' \
+              --notes-file docs/releases/v02.08.01.55-x1c-de2-rc1.md
+          fi
+          gh release upload "$TAG" release-output/* --repo "$REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$REPOSITORY" --draft=false --prerelease \
+            --title 'OrcaStudio X1C Community Edition · RC1' \
+            --notes-file docs/releases/v02.08.01.55-x1c-de2-rc1.md
