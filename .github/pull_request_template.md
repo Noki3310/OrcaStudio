@@ -1,27 +1,15 @@
-# Description
+# Problem und Änderung
 
-<!--
-> Please provide a summary of the changes made in this PR. Include details such as:
-  > * What issue does this PR address or fix?
-  > * What new features or enhancements does this PR introduce?
-  > * Are there any breaking changes or dependencies that need to be considered?
--->
+<!-- Welches Problem löst diese Änderung? Was ändert sich für Nutzer? Zugehöriges Issue verlinken. -->
 
-# Screenshots/Recordings/Graphs
+## Prüfung
 
-<!--
-> Please attach relevant screenshots to showcase the UI changes.
-> Please attach images that can help explain the changes.
--->
+<!-- Ausgeführte Tests und Ergebnisse nennen. Simulation, GUI-Prüfung und reale Gerätetests getrennt angeben. Bei Gerätefunktionen Modell, Firmware und Filamentquelle nennen. -->
 
-## Tests
+## Kompatibilität und offene Punkte
 
-<!--
-> Please describe the tests that you have conducted to verify the changes made in this PR.
--->
+<!-- Auswirkungen auf Profile/Projekte, Schutzbedingungen und bestehende Geräteunterstützung beschreiben. Keine Hardwarefreigabe allein aus einem erfolgreichen Build ableiten. -->
 
-<!--
-> A guide for users on how to download the artifacts from this PR.
--->
+## Bilder oder Logs
 
-[How to Download Pull Requests Artifacts for Testing](https://www.orcaslicer.com/wiki/how_to_download_pr_artifacts)
+<!-- Bei GUI-Änderungen Screenshots ergänzen. Zugangscodes, Tokens und private Gerätedaten entfernen. -->
