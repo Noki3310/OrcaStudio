@@ -29,8 +29,8 @@ temperature meets its on-print, softening and heat-distortion limits. An empty f
 occupied feeder still blocks the print-time request. Calibration, reported interlocks, spool
 rotation and power-conflict override remain blocked. Stop remains available
 while printing. Use the existing Start/Stop buttons; no separate firmware command
-or automatic restart when the firmware stops drying is introduced. Actual
-simultaneous printing and heating still need confirmation on X1C hardware. The regular capability-advertised path remains supported.
+or automatic restart when the firmware stops drying is introduced. User feedback confirms drying while a print uses an external spool/bypass.
+Heating while actively feeding through the same HT remains unconfirmed. The regular capability-advertised path remains supported.
 
 The wire command is the existing `print.ams_filament_drying` implementation.
 Independent reference: https://github.com/maziggy/bambuddy, functions
@@ -84,9 +84,13 @@ confirmation, a new name creates a copy. Delete requires confirmation. Loading
 never sends a command or changes the AMS material assignment. Existing command
 limits are rechecked on Start. Profiles whose material is unavailable cannot load.
 
-Hardware feedback on 2026-10-09: user confirmed Stop in Orca ended drying started
-on the printer. Start remains unconfirmed; the disabled button in the screenshot
-was a local print-time material guard, not evidence of firmware rejection.
+Updated hardware feedback, consolidated 2026-10-13: the user confirmed Stop in
+Orca ended drying started on the printer, and later confirmed Start from Orca.
+Drying continued while printing from an external spool/bypass. This does not
+confirm simultaneous heating and active feeding through the same HT. The earlier
+disabled Start button was a local print-time material guard, not evidence of
+firmware rejection. These observations are user reports, not an archived
+per-installer hardware acceptance log. See docs/TESTSTATUS_DE.md for release scope.
 
 Validation: 12 compiled production status-label transitions, 49 command cases,
 26 nozzle cases and gettext format/coverage checks. Full GUI rendering, profile
