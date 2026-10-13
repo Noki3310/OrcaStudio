@@ -32,7 +32,7 @@ Die ursprüngliche Linux-Netzwerkbrücke und WSL-Integration stammen aus dem vor
 | Trocknung über Orca starten | Vom Nutzer bestätigt |
 | Trocknung läuft während Druck mit externer Spule/Bypass weiter | Vom Nutzer bestätigt |
 | Gleichzeitig trocknen und aktiv aus demselben HT fördern | **Nicht bestätigt** |
-| Vollständige Abnahme der Profile und aller GUI-Zustände | Noch offen |
+| Trocknungsprofile und Bedienoberfläche: weitere Praxistests stehen noch aus. | Noch offen |
 | Standalone-Trocknung bei ausgeschaltetem X1C | **Nicht Bestandteil dieses Forks** |
 
 Der Legacy-Kompatibilitätspfad ist im Code auf X1C-Firmware **01.09.01.00** und AMS HT (**N3S**) begrenzt. Andere Firmwarestände sind dadurch nicht automatisch unterstützt. Die normale geräteseitig gemeldete Trocknungsunterstützung bleibt bestehen. Es wird keine Druckerfirmware verändert und kein fehlender Status als Erfolg ausgegeben.
