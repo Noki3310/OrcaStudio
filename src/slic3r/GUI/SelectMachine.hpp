@@ -1,13 +1,30 @@
 #ifndef slic3r_GUI_SelectMachine_hpp_
 #define slic3r_GUI_SelectMachine_hpp_
 
+#include <string>
+#include "libslic3r/PrintConfig.hpp"
+#include <vector>
+#include "libslic3r/ProjectTask.hpp"
+#include <map>
+#include <wx/image.h>
+#include <wx/event.h>
+#include <wx/dc.h>
+#include "slic3r/GUI/Widgets/StateColor.hpp"
+#include <list>
+#include <memory>
+#include "libslic3r/Format/bbs_3mf.hpp"
+#include "slic3r/GUI/DeviceCore/DevDefs.h"
+#include "slic3r/GUI/Widgets/TextInput.hpp"
+#include "slic3r/GUI/Jobs/PrintJob.hpp"
+#include "libslic3r/GCode/ThumbnailData.hpp"
+#include "slic3r/GUI/Widgets/StaticBox.hpp"
+#include "libslic3r/CommonDefs.hpp"
 #include <wx/wx.h>
 #include <wx/intl.h>
 #include <wx/collpane.h>
 #include <wx/dataview.h>
 #include <wx/artprov.h>
 #include <wx/xrc/xmlres.h>
-#include <wx/dataview.h>
 #include <wx/gdicmn.h>
 #include <wx/font.h>
 #include <wx/colour.h>
@@ -20,13 +37,10 @@
 #include <wx/dialog.h>
 #include <wx/popupwin.h>
 #include <wx/spinctrl.h>
-#include <wx/artprov.h>
 #include <wx/wrapsizer.h>
 #include <wx/srchctrl.h>
 
 #include <unordered_map>
-#include <chrono>
-#include <memory>
 
 #include "boost/bimap/bimap.hpp"
 #include "AmsMappingPopup.hpp"
@@ -303,14 +317,6 @@ private:
     int                                 m_timeout_count{0};
     int                                 m_print_error_code{0};
     bool                                m_is_in_sending_mode{ false };
-    bool                                m_is_auto_retry_0500_409d_invoke{ false };
-    bool                                m_auto_retry_0500_409d_pending{ false };
-    bool                                m_auto_retry_0500_409d_exhausted{ false };
-    int                                 m_auto_retry_0500_409d_attempts{ 0 };
-    int                                 m_auto_retry_0500_409d_ready_checks{ 0 };
-    int                                 m_auto_retry_0500_409d_wait_left{ 0 };
-    std::string                         m_auto_retry_0500_409d_dev_id;
-    std::unique_ptr<wxTimer>            m_auto_retry_0500_409d_timer{ nullptr };
     bool                                m_ams_mapping_res{ false };
     bool                                m_ams_mapping_valid{ false };
     bool                                m_export_3mf_cancel{ false };
@@ -329,7 +335,7 @@ private:
     wxColour                            m_colour_bold_color{wxColour(38, 46, 48)};
     StateColor                          m_btn_bg_enable;
 
-    std::unordered_map<string, PrintOption*> m_checkbox_list;
+    std::unordered_map<std::string, PrintOption*> m_checkbox_list;
     std::list<PrintOption*>                  m_checkbox_list_order;
 
     std::shared_ptr<int>                m_token = std::make_shared<int>(0);
@@ -515,10 +521,6 @@ public:
     void set_default_from_sdcard();
     void update_page_turn_state(bool show);
     void on_timer(wxTimerEvent& event);
-    void schedule_auto_retry_0500_409d(const std::string& dev_id);
-    void on_auto_retry_0500_409d_timer(wxTimerEvent& event);
-    bool is_auto_retry_0500_409d_ready();
-    void stop_auto_retry_0500_409d(bool clear_guard);
     void on_selection_changed(wxCommandEvent &event);
     void Enable_Refresh_Button(bool en);
     void Enable_Send_Button(bool en);
@@ -536,7 +538,7 @@ public:
     bool is_timeout();
     int  update_print_required_data(Slic3r::DynamicPrintConfig config, Slic3r::Model model, Slic3r::PlateDataPtrs plate_data_list, std::string file_name, std::string file_path);
     void set_print_type(PrintFromType type) {m_print_type = type;};
-    bool Show(bool show);
+    bool Show(bool show) override;
     void show_init();
     bool do_ams_mapping(MachineObject *obj_,bool use_ams);
     bool get_ams_mapping_result(std::string& mapping_array_str, std::string& mapping_array_str2, std::string& ams_mapping_info) const;
@@ -676,7 +678,6 @@ private:
     ScalableButton* m_button_question { nullptr };
 
     wxStaticBitmap* m_bed_image{ nullptr };
-    Label*         m_text_bed_type;
 };
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build OrcaStudio Flatpak locally using Docker with the same container image
+# Build OrcaSlicer Flatpak locally using Docker with the same container image
 # as the CI (build_all.yml).
 #
 # Usage:
@@ -77,16 +77,16 @@ esac
 # ---------- version & commit ----------
 cd "$PROJECT_ROOT"
 
-VER_PURE=$(grep 'set(SLIC3R_VERSION' version.inc | cut -d '"' -f2)
+VER_PURE=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
 if [ -z "$VER_PURE" ]; then
-    echo "Error: could not extract SLIC3R_VERSION from version.inc" >&2
+    echo "Error: could not extract version from version.inc" >&2
     exit 1
 fi
 VER="V${VER_PURE}"
 GIT_COMMIT_HASH=$(git rev-parse HEAD)
-BUNDLE_NAME="OrcaStudio-Linux-flatpak_${VER}_${ARCH}.flatpak"
+BUNDLE_NAME="OrcaSlicer-Linux-flatpak_${VER}_${ARCH}.flatpak"
 
-echo "=== OrcaStudio Flatpak Build ==="
+echo "=== OrcaSlicer Flatpak Build ==="
 echo "  Version:    ${VER} (${VER_PURE})"
 echo "  Commit:     ${GIT_COMMIT_HASH}"
 echo "  Arch:       ${ARCH}"
@@ -98,8 +98,8 @@ echo "  ccache:     enabled"
 echo ""
 
 # ---------- prepare manifest ----------
-MANIFEST_SRC="scripts/flatpak/com.orcaslicer.OrcaStudio.yml"
-MANIFEST_DOCKER="scripts/flatpak/com.orcaslicer.OrcaStudio.docker.yml"
+MANIFEST_SRC="scripts/flatpak/com.orcaslicer.OrcaSlicer.yml"
+MANIFEST_DOCKER="scripts/flatpak/com.orcaslicer.OrcaSlicer.docker.yml"
 # Ensure cleanup on exit (success or failure)
 trap 'rm -f "$PROJECT_ROOT/$MANIFEST_DOCKER"' EXIT
 
@@ -114,13 +114,16 @@ trap 'rm -f "$PROJECT_ROOT/$MANIFEST_DOCKER"' EXIT
         cat
     fi
 } < "$MANIFEST_SRC" | \
-sed "/name: OrcaStudio/{
+sed "/name: OrcaSlicer/{
     n
     s|^\([[:space:]]*\)buildsystem: simple|\1buildsystem: simple\\
 \1build-options:\\
 \1  env:\\
 \1    git_commit_hash: \"$GIT_COMMIT_HASH\"|
 }" > "$MANIFEST_DOCKER"
+
+# ---------- pack deps/ ----------
+./scripts/flatpak/make_deps_tar.sh
 
 # ---------- run build in Docker ----------
 DOCKER="${DOCKER:-docker}"
@@ -201,7 +204,7 @@ flatpak-builder $FORCE_CLEAN_FLAG \
     --arch="$BUILD_ARCH" \
     --repo=flatpak-repo \
     flatpak-build \
-    scripts/flatpak/com.orcaslicer.OrcaStudio.docker.yml
+    scripts/flatpak/com.orcaslicer.OrcaSlicer.docker.yml
 builder_end=$(date +%s)
 builder_duration=$((builder_end - builder_start))
 
@@ -210,7 +213,7 @@ flatpak build-bundle \
     --arch="$BUILD_ARCH" \
     flatpak-repo \
     "$BUNDLE_NAME" \
-    com.orcaslicer.OrcaStudio
+    com.orcaslicer.OrcaSlicer
 bundle_end=$(date +%s)
 bundle_duration=$((bundle_end - bundle_start))
 

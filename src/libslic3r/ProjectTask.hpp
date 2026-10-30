@@ -1,6 +1,7 @@
 #ifndef slic3r_ProjectTask_hpp_
 #define slic3r_ProjectTask_hpp_
 
+#include <functional>
 #include <map>
 #include <vector>
 #include <string>
@@ -9,8 +10,6 @@
 #include <boost/filesystem/fstream.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem.hpp>
-
-namespace fs = boost::filesystem;
 
 namespace Slic3r {
 
@@ -26,7 +25,6 @@ enum MachineBedType {
     BED_TYPE_PE,
     BED_TYPE_PEI,
     BED_TYPE_PTE,
-    BED_TYPE_SUPERTACK,
     BED_TYPE_COUNT,
 };
 
@@ -191,7 +189,6 @@ public:
         task_url_md5        = obj.task_url_md5;
         task_gcode_in_3mf   = obj.task_gcode_in_3mf;
         task_record_timelapse = obj.task_record_timelapse;
-        task_timelapse_use_internal = obj.task_timelapse_use_internal;
         task_bed_type       = obj.task_bed_type;
         task_bed_leveling   = obj.task_bed_leveling;
         task_flow_cali      = obj.task_flow_cali;
@@ -209,7 +206,7 @@ public:
     std::string     task_profile_id;    /* profile id*/
     std::string     task_name;          /* task name, generally filename as task name */
     std::string     task_file;          /* local full file path of 3mf or gcode */
-    fs::path        task_path;          /* local path of 3mf or gcode */
+    boost::filesystem::path task_path;          /* local path of 3mf or gcode */
     std::string     task_gcode_in_3mf;  /* gcode in 3mf */
     std::string     task_create_time;   /* time created by cloud */
     std::string     task_thumbnail_url; /* url of task thumbnail */
@@ -220,7 +217,6 @@ public:
     bool            task_vibration_cali; /* vibration calibration of task */
     bool            task_layer_inspect {true}; /* first layer inspection of task */
     bool            task_record_timelapse; /* record timelapse of task */
-    bool            task_timelapse_use_internal { false }; /* use internal storage for timelapse, cfg bit[2] */
 
     // task of plate info
     std::string     task_weight;        /* weight create by slicer */
@@ -328,7 +324,7 @@ public:
     std::string     project_url_md5;        /* md5 of project url file */
     std::string     project_name;
     std::string     project_3mf_file;
-    fs::path        project_path;
+    boost::filesystem::path project_path;
     std::string     project_content;
     std::string     project_country_code;
 

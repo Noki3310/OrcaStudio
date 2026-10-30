@@ -8,18 +8,22 @@
 #ifndef MediaFilePanel_h
 #define MediaFilePanel_h
 
+#include <boost/smart_ptr/shared_ptr.hpp>
+#include <cstddef>
 #include <set>
 
 #include "GUI_Utils.hpp"
 #include "wxExtensions.hpp"
 
+#include <wx/event.h>
+#include <string>
 #include <wx/frame.h>
+#include <wx/panel.h>
 
 class Button;
 class SwitchButton;
 class Label;
 class StaticBox;
-class TabCtrl;
 class PrinterFileSystem;
 
 namespace Slic3r {
@@ -48,7 +52,6 @@ public:
 
 private:
     void modeChanged(wxCommandEvent & e);
-    void updateStorageTabVisibility();
 
     void fetchUrl(boost::weak_ptr<PrinterFileSystem> fs);
 
@@ -63,9 +66,6 @@ private:
     ::Button    *m_button_year = nullptr;
     ::Button    *m_button_month = nullptr;
     ::Button    *m_button_all = nullptr;
-    ::Label     *m_switch_label = nullptr;
-
-    ::TabCtrl *     m_storage_tab = nullptr;
 
     ::StaticBox *   m_type_panel    = nullptr;
     ::Button *      m_button_video   = nullptr;
@@ -81,8 +81,6 @@ private:
     ImageGrid * m_image_grid   = nullptr;
 
     bool m_external = true;
-    bool m_support_internal_storage = false;
-    bool m_support_internal_timelapse = false;
 
     std::string m_machine;
     std::string m_lan_ip;

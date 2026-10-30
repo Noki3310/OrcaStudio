@@ -1,12 +1,23 @@
 #include "Http.hpp"
-#include "BBLNetworkPlugin.hpp"
+#include "libslic3r_version.h"
 
-#include <cstdlib>
-#include <cctype>
 #include <algorithm>
 #include <atomic>
+#include <boost/filesystem/operations.hpp>
+#include <cassert>
+#include <cstdlib>
+#include <curl/curlver.h>
+#include <fstream>
 #include <functional>
+#include <memory>
+#include <string>
+#include <stdlib.h>
+#include <map>
+#include <mutex>
+#include <ios>
+#include "libslic3r/Exception.hpp"
 #include <iterator>
+#include <ostream>
 #include <thread>
 #include <deque>
 #include <sstream>
@@ -16,10 +27,9 @@
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
-#include <boost/nowide/convert.hpp>
-#include <nlohmann/json.hpp>
 
 #include <curl/curl.h>
+#include <utility>
 
 #ifdef OPENSSL_CERT_OVERRIDE
 #include <openssl/x509.h>
@@ -51,7 +61,6 @@ struct CurlGlobalInit
             "/etc/ssl/ca-bundle.pem"              // OpenSUSE Tumbleweed
         };
 
-        namespace fs = boost::filesystem;
         // Env var name for the OpenSSL CA bundle (SSL_CERT_FILE nomally)
         const char *const SSL_CA_FILE = X509_get_default_cert_file_env();
         const char * ssl_cafile = ::getenv(SSL_CA_FILE);
@@ -60,10 +69,14 @@ struct CurlGlobalInit
             ssl_cafile = X509_get_default_cert_file();
 
         int replace = true;
-        if (!ssl_cafile || !fs::exists(fs::path(ssl_cafile))) {
+        // ORCA: non-throwing overload; fs_ec is deliberately unread. An existing but unreadable
+        //       path (a static build's baked-in OPENSSLDIR run as another user, say) must fall
+        //       through to CA_BUNDLES, not throw out of this constructor.
+        boost::system::error_code fs_ec;
+        if (!ssl_cafile || !fs::exists(fs::path(ssl_cafile), fs_ec)) {
             const char * bundle = nullptr;
             for (const char * b : CA_BUNDLES) {
-                if (fs::exists(fs::path(b))) {
+                if (fs::exists(fs::path(b), fs_ec)) {
                     ::setenv(SSL_CA_FILE, bundle = b, replace);
                     break;
                 }
@@ -91,35 +104,7 @@ struct CurlGlobalInit
 std::unique_ptr<CurlGlobalInit> CurlGlobalInit::instance;
 
 std::map<std::string, std::string> extra_headers;
-std::map<std::string, std::string> bambu_extra_headers;
 std::mutex g_mutex;
-
-
-bool host_matches_domain(std::string host, const std::string& domain)
-{
-    std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    while (!host.empty() && host.back() == '.')
-        host.pop_back();
-    return host == domain || (host.size() > domain.size() &&
-        host.compare(host.size() - domain.size(), domain.size(), domain) == 0 &&
-        host[host.size() - domain.size() - 1] == '.');
-}
-
-bool is_bambu_linux_runtime_url(const std::string& url)
-{
-#if defined(_WIN32) || defined(__APPLE__)
-    if (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0)
-        return false;
-    const std::string host = Http::get_host_from_url(url);
-    return host_matches_domain(host, "bambulab.com") ||
-           host_matches_domain(host, "bambulab.cn") ||
-           host_matches_domain(host, "bambu-lab.com") ||
-           host_matches_domain(host, "makerworld.com");
-#else
-    (void) url;
-    return false;
-#endif
-}
 
 struct form_file
 {
@@ -130,18 +115,6 @@ struct form_file
     form_file(fs::path const& p, const boost::filesystem::ifstream::off_type offset, const size_t content_length)
         : ifs(p, std::ios::in | std::ios::binary), init_offset(offset), content_length(content_length)
     {}
-};
-
-struct RuntimeMultipartPart
-{
-    std::string name;
-    std::string filename;
-    std::string content_type;
-    std::string text;
-    fs::path path;
-    boost::filesystem::ifstream::off_type offset{0};
-    std::size_t length{0};
-    bool file{false};
 };
 
 struct Http::priv
@@ -165,17 +138,11 @@ struct Http::priv
 	// Used for storing file streams added as multipart form parts
 	// Using a deque here because unlike vector it doesn't ivalidate pointers on insertion
 	std::deque<form_file> form_files;
-    std::vector<RuntimeMultipartPart> runtime_multipart_parts;
 	std::string postfields;
 	std::string error_buffer;    // Used for CURLOPT_ERRORBUFFER
     std::string headers;
 	size_t limit;
-	std::atomic<bool> cancel;
-    bool use_linux_runtime_transport;
-    bool force_native_transport;
-    long timeout_connect_seconds;
-    long timeout_max_seconds;
-    std::string range;
+	std::atomic_bool cancel;
     std::unique_ptr<form_file> putFile;
 
 	std::thread io_thread;
@@ -210,7 +177,6 @@ struct Http::priv
 	std::string curl_error(CURLcode curlcode);
 	std::string body_size_error();
 	void http_perform();
-    void http_perform_linux_runtime();
 };
 
 // add a dummy log callback
@@ -232,10 +198,6 @@ Http::priv::priv(const std::string &url)
 	, error_buffer(CURL_ERROR_SIZE + 1, '\0')
 	, limit(0)
 	, cancel(false)
-    , use_linux_runtime_transport(false)
-    , force_native_transport(false)
-    , timeout_connect_seconds(DEFAULT_TIMEOUT_CONNECT)
-    , timeout_max_seconds(DEFAULT_TIMEOUT_MAX)
 {
     Http::tls_global_init();
 
@@ -247,13 +209,11 @@ Http::priv::priv(const std::string &url)
     set_timeout_max(DEFAULT_TIMEOUT_MAX);
 	::curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, log_trace);
 	::curl_easy_setopt(curl, CURLOPT_URL, url.c_str());   // curl makes a copy internally
-	::curl_easy_setopt(curl, CURLOPT_USERAGENT, SLIC3R_APP_NAME "/" SLIC3R_VERSION);
+	::curl_easy_setopt(curl, CURLOPT_USERAGENT, SLIC3R_APP_NAME "/" SoftFever_VERSION);
 	::curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, &error_buffer.front());
-	::curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
 #ifdef __WINDOWS__
 	::curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_MAX_TLSv1_2);
 #endif
-	::curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 	::curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 	::curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
 
@@ -314,18 +274,15 @@ int Http::priv::xfercb(void *userp, curl_off_t dltotal, curl_off_t dlnow, curl_o
 	bool cb_cancel = false;
 
 	if (self->progressfn) {
-		double speed;
+		double speed = 0.;
         curl_easy_getinfo(self->curl, CURLINFO_SPEED_UPLOAD, &speed);
-		if (speed > 0.01)
-			speed = speed;
 		Progress progress(dltotal, dlnow, ultotal, ulnow, self->buffer, speed);
 		self->progressfn(progress, cb_cancel);
 	}
 
-	if (cb_cancel)
-        self->cancel.store(true, std::memory_order_release);
+	if (cb_cancel) { self->cancel.store(true); }
 
-	return self->cancel.load(std::memory_order_acquire) ? 1 : 0;
+	return self->cancel.load();
 }
 
 int Http::priv::xfercb_legacy(void *userp, double dltotal, double dlnow, double ultotal, double ulnow)
@@ -371,75 +328,72 @@ size_t Http::priv::headers_cb(char *buffer, size_t size, size_t nitems, void *us
 
 void Http::priv::set_timeout_connect(long timeout)
 {
-    timeout_connect_seconds = timeout;
 	::curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, timeout);
 }
 
 void Http::priv::set_timeout_max(long timeout)
 {
-    timeout_max_seconds = timeout;
     ::curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
 }
 
 void Http::priv::form_add_file(const char *name, const fs::path &path, const char* filename, boost::filesystem::ifstream::off_type offset, size_t length)
 {
-    const std::string field_name = name ? std::string(name) : std::string();
-    const std::string filename_value = filename ? std::string(filename) : path.filename().string();
-    runtime_multipart_parts.push_back(RuntimeMultipartPart{
-        field_name, filename_value, "application/octet-stream", {}, path, offset, length, true
-    });
+	// We can't use CURLFORM_FILECONTENT, because curl doesn't support Unicode filenames on Windows
+	// and so we use CURLFORM_STREAM with boost ifstream to read the file.
 
-    form_files.emplace_back(path, offset, length);
-    auto &f = form_files.back();
+	std::string filename_str;
+	if (filename == nullptr) {
+		filename_str = path.string();
+		filename = filename_str.c_str();
+	}
+
+	form_files.emplace_back(path, offset, length);
+	auto &f = form_files.back();
     size_t size = length;
     if (length == 0) {
         f.ifs.seekg(0, std::ios::end);
-        const auto end = f.ifs.tellg();
-        size = end > offset ? static_cast<size_t>(end - offset) : 0;
+        size = f.ifs.tellg() - offset;
     }
     f.ifs.seekg(offset);
 
-    ::curl_formadd(&form, &form_end,
-        CURLFORM_COPYNAME, field_name.c_str(),
-        CURLFORM_FILENAME, filename_value.c_str(),
-        CURLFORM_CONTENTTYPE, "application/octet-stream",
-        CURLFORM_STREAM, static_cast<void*>(&f),
-        CURLFORM_CONTENTSLENGTH, static_cast<long>(size),
-        CURLFORM_END
-    );
+	if (filename != nullptr) {
+		::curl_formadd(&form, &form_end,
+			CURLFORM_COPYNAME, name,
+			CURLFORM_FILENAME, filename,
+			CURLFORM_CONTENTTYPE, "application/octet-stream",
+			CURLFORM_STREAM, static_cast<void*>(&f),
+			CURLFORM_CONTENTSLENGTH, static_cast<long>(size),
+			CURLFORM_END
+		);
+	}
 }
 
 void Http::priv::mime_form_add_text(const char* name, const char* value)
 {
-    const std::string field_name = name ? std::string(name) : std::string();
-    const std::string field_value = value ? std::string(value) : std::string();
-    runtime_multipart_parts.push_back(RuntimeMultipartPart{
-        field_name, {}, "multipart/form-data", field_value, {}, 0, 0, false
-    });
+	if (!mime) {
+		mime = curl_mime_init(curl);
+	}
 
-    if (!mime)
-        mime = curl_mime_init(curl);
-    curl_mimepart *part = curl_mime_addpart(mime);
-    curl_mime_name(part, field_name.c_str());
-    curl_mime_type(part, "multipart/form-data");
-    curl_mime_data(part, field_value.c_str(), CURL_ZERO_TERMINATED);
+	curl_mimepart *part;
+	part = curl_mime_addpart(mime);
+	curl_mime_name(part, name);
+	curl_mime_type(part, "multipart/form-data");
+	curl_mime_data(part, value, CURL_ZERO_TERMINATED);
 }
 
 void Http::priv::mime_form_add_file(const char* name, const char* path)
 {
-    const std::string filename = name ? std::string(name) : std::string();
-    const fs::path file_path(path ? path : "");
-    runtime_multipart_parts.push_back(RuntimeMultipartPart{
-        "file", filename, "multipart/form-data", {}, file_path, 0, 0, true
-    });
+	if (!mime) {
+		mime = curl_mime_init(curl);
+	}
 
-    if (!mime)
-        mime = curl_mime_init(curl);
-    curl_mimepart* part = curl_mime_addpart(mime);
-    curl_mime_name(part, "file");
-    curl_mime_type(part, "multipart/form-data");
-    curl_mime_filedata(part, file_path.string().c_str());
-    curl_mime_filename(part, filename.c_str());
+	curl_mimepart* part;
+	part = curl_mime_addpart(mime);
+	curl_mime_name(part, "file");
+	curl_mime_type(part, "multipart/form-data");
+	curl_mime_filedata(part, path);
+	// BBS specify filename after filedata
+	curl_mime_filename(part, name);
 }
 
 //FIXME may throw! Is the caller aware of it?
@@ -472,9 +426,8 @@ void Http::priv::set_del_body(const std::string& body)
 	postfields = body;
 }
 
-void Http::priv::set_range(const std::string& value)
+void Http::priv::set_range(const std::string& range)
 {
-    range = value;
 	::curl_easy_setopt(curl, CURLOPT_RANGE, range.c_str());
 }
 
@@ -492,171 +445,8 @@ std::string Http::priv::body_size_error()
 	return (boost::format("HTTP body data size exceeded limit (%1% bytes)") % limit).str();
 }
 
-void Http::priv::http_perform_linux_runtime()
-{
-    if (cancel.load(std::memory_order_acquire)) {
-        Progress progress(0, 0, 0, 0, buffer);
-        bool cancelled = true;
-        if (progressfn)
-            progressfn(progress, cancelled);
-        return;
-    }
-
-    nlohmann::json multipart_parts = nlohmann::json::array();
-    std::string request_body;
-    if (!runtime_multipart_parts.empty()) {
-        try {
-            for (const auto& part : runtime_multipart_parts) {
-                const std::size_t offset = request_body.size();
-                if (part.file) {
-                    fs::ifstream file(part.path, std::ios::in | std::ios::binary);
-                    if (!file)
-                        throw std::runtime_error("failed to open multipart file: " + part.path.string());
-                    file.seekg(0, std::ios::end);
-                    const std::streamoff end = static_cast<std::streamoff>(file.tellg());
-                    const std::streamoff start = static_cast<std::streamoff>(part.offset);
-                    if (end < 0 || start < 0 || start > end)
-                        throw std::runtime_error("invalid multipart file range: " + part.path.string());
-                    const std::uintmax_t available_raw = static_cast<std::uintmax_t>(end - start);
-                    if (available_raw > std::numeric_limits<std::size_t>::max())
-                        throw std::runtime_error("multipart file is too large: " + part.path.string());
-                    const std::size_t available = static_cast<std::size_t>(available_raw);
-                    const std::size_t bytes = part.length == 0 ? available : part.length;
-                    if (bytes > available)
-                        throw std::runtime_error("multipart file range exceeds file size: " + part.path.string());
-                    constexpr std::size_t runtime_body_limit = 1024ULL * 1024ULL * 1024ULL;
-                    if (bytes > runtime_body_limit || request_body.size() > runtime_body_limit - bytes)
-                        throw std::runtime_error("multipart request body exceeds Linux runtime limit");
-                    file.seekg(start, std::ios::beg);
-                    if (!file)
-                        throw std::runtime_error("failed to seek multipart file: " + part.path.string());
-                    const std::size_t old_size = request_body.size();
-                    request_body.resize(old_size + bytes);
-                    if (bytes > 0) {
-                        file.read(request_body.data() + static_cast<std::ptrdiff_t>(old_size), static_cast<std::streamsize>(bytes));
-                        if (static_cast<std::size_t>(file.gcount()) != bytes)
-                            throw std::runtime_error("failed to read complete multipart file: " + part.path.string());
-                    }
-                } else {
-                    constexpr std::size_t runtime_body_limit = 1024ULL * 1024ULL * 1024ULL;
-                    if (part.text.size() > runtime_body_limit || request_body.size() > runtime_body_limit - part.text.size())
-                        throw std::runtime_error("multipart request body exceeds Linux runtime limit");
-                    request_body.append(part.text);
-                }
-                multipart_parts.push_back({
-                    {"name", part.name},
-                    {"filename", part.filename},
-                    {"content_type", part.content_type},
-                    {"offset", offset},
-                    {"size", request_body.size() - offset}
-                });
-            }
-        } catch (const std::exception& e) {
-            if (errorfn)
-                errorfn({}, e.what(), 0);
-            return;
-        }
-    } else {
-        if (form != nullptr || mime != nullptr) {
-            if (errorfn)
-                errorfn({}, "multipart metadata is missing for Linux runtime transport", 0);
-            return;
-        }
-        request_body = postfields;
-        if (putFile) {
-            try {
-                request_body.assign(std::istreambuf_iterator<char>(putFile->ifs), std::istreambuf_iterator<char>());
-            } catch (const std::exception& e) {
-                putFile.reset();
-                if (errorfn)
-                    errorfn({}, std::string("failed to read Linux runtime upload body: ") + e.what(), 0);
-                return;
-            }
-        }
-    }
-
-    std::vector<std::string> header_lines;
-    for (curl_slist* header = headerlist; header; header = header->next) {
-        if (header->data)
-            header_lines.emplace_back(header->data);
-    }
-
-    unsigned int http_status = 0;
-    std::string response_headers;
-    std::string primary_ip;
-    std::string error;
-    const std::size_t max_bytes = limit > 0 ? limit : DEFAULT_SIZE_LIMIT;
-    const long connect_timeout_ms = std::max<long>(timeout_connect_seconds, 1L) * 1000L;
-    const long timeout_ms = timeout_max_seconds > 0
-        ? std::min<long>(timeout_max_seconds * 1000L, 1800000L)
-        : 1800000L;
-
-    const auto progress_bridge = +[](void* user, unsigned long long dltotal, unsigned long long dlnow,
-                                      unsigned long long ultotal, unsigned long long ulnow,
-                                      double upload_speed) -> int {
-        auto* self = static_cast<priv*>(user);
-        if (!self)
-            return 1;
-        bool callback_cancel = self->cancel.load(std::memory_order_acquire);
-        if (self->progressfn) {
-            Progress progress(static_cast<size_t>(dltotal), static_cast<size_t>(dlnow),
-                              static_cast<size_t>(ultotal), static_cast<size_t>(ulnow),
-                              self->buffer, upload_speed);
-            self->progressfn(progress, callback_cancel);
-        }
-        if (callback_cancel)
-            self->cancel.store(true, std::memory_order_release);
-        return self->cancel.load(std::memory_order_acquire) ? 1 : 0;
-    };
-    const auto cancel_bridge = +[](void* user) -> bool {
-        auto* self = static_cast<priv*>(user);
-        return !self || self->cancel.load(std::memory_order_acquire);
-    };
-
-    buffer.clear();
-    const int rc = BBLNetworkPlugin::linux_runtime_http_request(
-        method, url, header_lines, request_body, multipart_parts.dump(), range, max_bytes,
-        connect_timeout_ms, timeout_ms, progress_bridge, cancel_bridge, this,
-        &http_status, &buffer, &response_headers, &primary_ip, &error);
-    putFile.reset();
-    headers = std::move(response_headers);
-
-    if (headerfn && !headers.empty())
-        headerfn(headers);
-
-    if (cancel.load(std::memory_order_acquire)) {
-        Progress progress(buffer.size(), buffer.size(), request_body.size(), request_body.size(), buffer);
-        bool cancelled = true;
-        if (progressfn)
-            progressfn(progress, cancelled);
-        return;
-    }
-
-    if (rc != 0) {
-        if (errorfn)
-            errorfn(std::move(buffer), error.empty() ? "Linux runtime HTTP request failed" : error, 0);
-        return;
-    }
-
-    if (http_status >= 200 && http_status < 300) {
-        if (completefn)
-            completefn(std::move(buffer), http_status);
-        if (ipresolvefn && !primary_ip.empty())
-            ipresolvefn(primary_ip);
-    } else if (http_status >= 400) {
-        if (errorfn)
-            errorfn(std::move(buffer), {}, http_status);
-    }
-}
-
 void Http::priv::http_perform()
 {
-#if defined(_WIN32) || defined(__APPLE__)
-    if (!force_native_transport && (use_linux_runtime_transport || is_bambu_linux_runtime_url(url))) {
-        http_perform_linux_runtime();
-        return;
-    }
-#endif
 	::curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	::curl_easy_setopt(curl, CURLOPT_POSTREDIR, CURL_REDIR_POST_ALL);
 	::curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writecb);
@@ -695,6 +485,14 @@ void Http::priv::http_perform()
 	if (!postfields.empty()) {
 		::curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postfields.c_str());
 		::curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, postfields.size());
+	} else if (method == "POST" && form == nullptr && mime == nullptr) {
+		// A POST with no body. Without CURLOPT_POSTFIELDS, curl takes the request body from
+		// the read callback, but form_file_read_cb only has a usable user pointer for a PUT
+		// (set_put_body) or a streamed multipart part (form_add_file); for an empty POST it
+		// dereferences libcurl's default READDATA as a form_file and crashes. Point curl at a
+		// zero-length body so the read callback is never used.
+		::curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postfields.c_str());
+		::curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(0));
 	}
 
 	CURLcode res = ::curl_easy_perform(curl);
@@ -703,7 +501,7 @@ void Http::priv::http_perform()
 
 	if (res != CURLE_OK) {
 		if (res == CURLE_ABORTED_BY_CALLBACK) {
-			if (cancel.load(std::memory_order_acquire)) {
+			if (cancel.load()) {
 				// The abort comes from the request being cancelled programatically
 				Progress dummyprogress(0, 0, 0, 0, std::string());
 				bool cancel = true;
@@ -743,12 +541,8 @@ void Http::priv::http_perform()
 Http::Http(const std::string &url) : p(new priv(url)) {
 
     std::lock_guard<std::mutex> l(g_mutex);
-	for (const auto& [name, value] : extra_headers)
-		this->header(name, value);
-    if (is_bambu_linux_runtime_url(url)) {
-        for (const auto& [name, value] : bambu_extra_headers)
-            this->header(name, value);
-    }
+	for (auto it = extra_headers.begin(); it != extra_headers.end(); it++)
+		this->header(it->first, it->second);
 }
 
 
@@ -813,12 +607,8 @@ Http& Http::headers_reset()
 	p->headerlist = curl_slist_append(p->headerlist, "Expect:");
 
 	std::lock_guard<std::mutex> l(g_mutex);
-	for (const auto& [name, value] : extra_headers)
-		this->header(name, value);
-	if (is_bambu_linux_runtime_url(p->url)) {
-		for (const auto& [name, value] : bambu_extra_headers)
-			this->header(name, value);
-	}
+	for (auto it = extra_headers.begin(); it != extra_headers.end(); ++it)
+		this->header(it->first, it->second);
 
 	return *this;
 }
@@ -871,26 +661,6 @@ Http& Http::tls_verify(bool enable)
 	return *this;
 }
 
-Http& Http::via_linux_runtime(bool enable)
-{
-    if (p) {
-        p->use_linux_runtime_transport = enable;
-        if (enable)
-            p->force_native_transport = false;
-    }
-    return *this;
-}
-
-Http& Http::via_native_transport(bool enable)
-{
-    if (p) {
-        p->force_native_transport = enable;
-        if (enable)
-            p->use_linux_runtime_transport = false;
-    }
-    return *this;
-}
-
 Http& Http::form_clear() {
 	if (p) {
         if (p->form) {
@@ -902,7 +672,6 @@ Http& Http::form_clear() {
 			f.ifs.close();
 		}
 		p->form_files.clear();
-        p->runtime_multipart_parts.clear();
 
 	}
 	return *this;
@@ -910,17 +679,15 @@ Http& Http::form_clear() {
 
 Http& Http::form_add(const std::string &name, const std::string &contents)
 {
-    if (p) {
-        p->runtime_multipart_parts.push_back(RuntimeMultipartPart{
-            name, {}, {}, contents, {}, 0, 0, false
-        });
-        ::curl_formadd(&p->form, &p->form_end,
-            CURLFORM_COPYNAME, name.c_str(),
-            CURLFORM_COPYCONTENTS, contents.c_str(),
-            CURLFORM_END
-        );
-    }
-    return *this;
+	if (p) {
+		::curl_formadd(&p->form, &p->form_end,
+			CURLFORM_COPYNAME, name.c_str(),
+			CURLFORM_COPYCONTENTS, contents.c_str(),
+			CURLFORM_END
+		);
+	}
+
+	return *this;
 }
 
 Http& Http::form_add_file(const std::string &name, const fs::path &path, boost::filesystem::ifstream::off_type offset, size_t length)
@@ -945,11 +712,8 @@ Http& Http::mime_form_add_file(std::string &name, const char* path)
 
 Http& Http::form_add_file(const std::wstring& name, const fs::path& path, boost::filesystem::ifstream::off_type offset, size_t length)
 {
-    if (p) {
-        const std::string utf8_name = boost::nowide::narrow(name);
-        p->form_add_file(utf8_name.c_str(), path, nullptr, offset, length);
-    }
-    return *this;
+	if (p) { p->form_add_file((char*)name.c_str(), path.c_str(), nullptr, offset, length); }
+	return *this;
 }
 
 Http& Http::form_add_file(const std::string &name, const fs::path &path, const std::string &filename, boost::filesystem::ifstream::off_type offset, size_t length)
@@ -1048,7 +812,7 @@ void Http::perform_sync()
 
 void Http::cancel()
 {
-	if (p) { p->cancel.store(true, std::memory_order_release); }
+	if (p) { p->cancel.store(true); }
 }
 
 void Http::print() const
@@ -1170,12 +934,6 @@ void Http::set_extra_headers(std::map<std::string, std::string> headers)
 	extra_headers.swap(headers);
 }
 
-void Http::set_bambu_extra_headers(std::map<std::string, std::string> headers)
-{
-    std::lock_guard<std::mutex> l(g_mutex);
-    bambu_extra_headers.swap(headers);
-}
-
 std::map<std::string, std::string> Http::get_extra_headers()
 {
     std::lock_guard<std::mutex> l(g_mutex);
@@ -1200,13 +958,12 @@ std::string Http::tls_global_init()
 
 std::string Http::tls_system_cert_store()
 {
-    std::string ret;
-
 #ifdef OPENSSL_CERT_OVERRIDE
-    ret = ::getenv(X509_get_default_cert_file_env());
+    if (const char *cert_file = ::getenv(X509_get_default_cert_file_env()))
+        return cert_file;
 #endif
 
-    return ret;
+    return {};
 }
 
 std::string Http::url_encode(const std::string &str)

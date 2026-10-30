@@ -1,4 +1,5 @@
 #include "NetworkAgentFactory.hpp"
+#include "CloudProvider.hpp"
 #include "IPrinterAgent.hpp"
 #include "ICloudServiceAgent.hpp"
 #include "BBLPrinterAgent.hpp"
@@ -6,7 +7,6 @@
 #include "QidiPrinterAgent.hpp"
 #include "SnapmakerPrinterAgent.hpp"
 #include "MoonrakerPrinterAgent.hpp"
-#include "SlicerLinuxRuntime/SlicerLinuxRuntimeConfig.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
 #include "slic3r/plugin/pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp"
 #include "CrealityPrintAgent.hpp"
@@ -14,11 +14,20 @@
 #include <boost/log/trivial.hpp>
 #include <chrono>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <slic3r/GUI/GUI_App.hpp>
+#include <slic3r/GUI/I18N.hpp>
+#include <slic3r/GUI/format.hpp>
 #include <slic3r/plugin/PluginDescriptor.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
+#include <vector>
+#include <wx/app.h>
+#include <wx/msgdlg.h>
+#include <wx/string.h>
+#include "libslic3r/AppConfig.hpp"
 
 namespace Slic3r {
 namespace {
@@ -194,39 +203,33 @@ void NetworkAgentFactory::register_all_agents()
 
 std::unique_ptr<NetworkAgent> create_agent_from_config(const std::string& log_dir, AppConfig* app_config)
 {
-    NetworkAgentFactory::register_all_agents();
-
     if (!app_config)
         return std::make_unique<NetworkAgent>(nullptr, nullptr);
 
-    const bool has_external_component = app_config->get_bool("installed_networking");
-    const std::string primary_provider = has_external_component ? BBL_CLOUD_PROVIDER : ORCA_CLOUD_PROVIDER;
-
-    auto cloud_agent = NetworkAgentFactory::create_cloud_agent(primary_provider, log_dir);
-    if (!cloud_agent)
-        BOOST_LOG_TRIVIAL(error) << "Failed to create cloud agent: " << primary_provider;
+    // Always create Orca cloud agent as the primary provider
+    auto cloud_agent = NetworkAgentFactory::create_cloud_agent(ORCA_CLOUD_PROVIDER, log_dir);
+    if (!cloud_agent) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to create cloud agent";
+    }
 
     auto agent = std::make_unique<NetworkAgent>(std::move(cloud_agent), nullptr);
 
     if (agent) {
-        if (auto* orca_cloud = dynamic_cast<OrcaCloudServiceAgent*>(agent->get_cloud_agent(ORCA_CLOUD_PROVIDER).get()))
+        // create orca cloud agent first
+        auto* orca_cloud = dynamic_cast<OrcaCloudServiceAgent*>(agent->get_cloud_agent().get());
+        if (orca_cloud) {
             orca_cloud->configure_urls(app_config);
+        }
 
+        // Initialize third-party cloud agents from config
         auto providers = app_config->get_cloud_providers();
-        if (has_external_component && std::find(providers.begin(), providers.end(), BBL_CLOUD_PROVIDER) == providers.end())
-            providers.push_back(BBL_CLOUD_PROVIDER);
-
         for (const auto& provider : providers) {
-            if (provider == primary_provider)
-                continue;
+            if (provider == ORCA_CLOUD_PROVIDER)
+                continue; // Primary agent already created above
             auto third_party_agent = NetworkAgentFactory::create_cloud_agent(provider, log_dir);
             if (third_party_agent) {
-                if (provider == ORCA_CLOUD_PROVIDER) {
-                    if (auto* orca_cloud = dynamic_cast<OrcaCloudServiceAgent*>(third_party_agent.get()))
-                        orca_cloud->configure_urls(app_config);
-                }
                 agent->add_cloud_agent(provider, std::move(third_party_agent));
-                BOOST_LOG_TRIVIAL(info) << "Initialized cloud agent: " << provider;
+                BOOST_LOG_TRIVIAL(info) << "Initialized third-party cloud agent: " << provider;
             }
         }
     }
@@ -321,6 +324,21 @@ void NetworkAgentFactory::register_python_printer_agent(const std::string& plugi
 
     std::shared_ptr<IPrinterAgent> cached_agent;
 
+    auto reject_conflicting_capability = [plugin_key, capability_name](const std::string& error_message) {
+        if (!wxTheApp || GUI::wxGetApp().is_closing())
+            return;
+        GUI::wxGetApp().CallAfter([plugin_key, capability_name, error_message]() {
+            if (GUI::wxGetApp().is_closing())
+                return;
+            PluginManager& manager = PluginManager::instance();
+            manager.set_plugin_error(plugin_key, error_message);
+            // note: the unload callback triggered by disabling will call deregister,
+            // which will be a no-op since the printer agent is never registered
+            manager.set_capability_enabled({PluginCapabilityType::PrinterConnection, capability_name, plugin_key}, false);
+            wxMessageBox(wxString::FromUTF8(error_message.c_str()), _L("Plugins"), wxOK | wxICON_WARNING, GUI::wxGetApp().GetTopWindow());
+        });
+    };
+
     {
         std::lock_guard<std::mutex> lock(s_registry_mutex);
 
@@ -339,9 +357,12 @@ void NetworkAgentFactory::register_python_printer_agent(const std::string& plugi
         auto& python_agent_ids = get_python_printer_agent_ids();
         for (const auto& pair : python_agent_ids) {
             if (pair.first != capability_key && pair.second == info.id) {
-                BOOST_LOG_TRIVIAL(warning) << "Printer-agent plugin '" << capability_name << "' uses duplicate agent ID '" << info.id
-                                           << "' already registered by capability '" << pair.first.second << "' from plugin '"
-                                           << pair.first.first << "'";
+                const std::string error_message = GUI::format(
+                    // TRN %1% is the printer agent name, %2% its ID, %3% the capability and %4% the plugin already using that ID.
+                    _u8L("Printer-agent '%1%' could not be enabled: agent ID '%2%' is already registered by capability '%3%' from plugin '%4%'."),
+                    info.name, info.id, pair.first.second, pair.first.first);
+                BOOST_LOG_TRIVIAL(warning) << error_message;
+                reject_conflicting_capability(error_message);
                 return;
             }
         }
@@ -361,12 +382,24 @@ void NetworkAgentFactory::register_python_printer_agent(const std::string& plugi
 
         auto& agents = get_printer_agents();
         auto agent_it = agents.find(info.id);
+        // why: reject only when the ID is owned by SOMEONE ELSE - a built-in has an empty
+        //   plugin_identifier, another plugin/capability has a different plugin_full_ref. When it
+        //   IS the same plugin_full_ref, this capability is just re-registering itself, so fall
+        //   through and refresh.
         if (agent_it != agents.end() && agent_it->second.plugin_identifier != plugin_full_ref) {
-            BOOST_LOG_TRIVIAL(warning) << "Printer-agent plugin '" << capability_name << "' uses agent ID '" << info.id
-                                       << "' already registered by '" << agent_it->second.display_name << "'";
+            const std::string error_message = GUI::format(
+                // TRN %1% is the printer agent name, %2% its ID and %3% the printer agent already using that ID.
+                _u8L("Printer-agent '%1%' could not be enabled: agent ID '%2%' is already registered by '%3%'."),
+                info.name, info.id, agent_it->second.display_name);
+            BOOST_LOG_TRIVIAL(warning) << error_message;
+            reject_conflicting_capability(error_message);
             return;
         }
 
+        // why: insert_or_assign, not emplace - reaching here means the ID is new, or the same
+        //   capability is re-registering (same plugin_full_ref). In the re-register case we WANT to
+        //   overwrite so the factory closure points at the current live capability instance; emplace
+        //   would silently keep the stale entry.
         agents.insert_or_assign(info.id, PrinterAgentInfo(info.id, info.name, plugin_full_ref, std::move(factory)));
         python_agent_ids[capability_key] = info.id;
 
@@ -472,25 +505,5 @@ void NetworkAgentFactory::deregister_python_printer_agent(const std::string& plu
                             << plugin_key << "' with agent ID '" << agent_id << "'";
 }
 
-bool NetworkAgentFactory::is_current_printer_agent_plugin()
-{
-    auto* preset_bundle = GUI::wxGetApp().preset_bundle;
-    if (!preset_bundle)
-        return false;
-
-    std::string agent_key = ORCA_PRINTER_AGENT_ID;
-    if (preset_bundle->is_bbl_vendor())
-        agent_key = BBL_PRINTER_AGENT_ID;
-
-    const auto& cfg = preset_bundle->printers.get_edited_preset().config;
-    if (cfg.has("printer_agent")) {
-        const std::string& value = cfg.option<ConfigOptionString>("printer_agent")->value;
-        if (!value.empty())
-            agent_key = value;
-    }
-
-    const PrinterAgentInfo* info = get_printer_agent_info(agent_key);
-    return info && info->is_plugin();
-}
 
 } // namespace Slic3r

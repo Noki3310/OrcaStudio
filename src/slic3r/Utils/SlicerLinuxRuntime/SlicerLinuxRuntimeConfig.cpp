@@ -13,7 +13,6 @@
 #include <boost/filesystem/path.hpp>
 #include <openssl/evp.h>
 #include <nlohmann/json.hpp>
-#include "../bambu_networking.hpp"
 
 namespace Slic3r::SlicerLinuxRuntime {
 

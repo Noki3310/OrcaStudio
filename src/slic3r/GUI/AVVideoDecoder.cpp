@@ -1,8 +1,14 @@
 #include "AVVideoDecoder.hpp"
 
+#include <algorithm>
 #include <assert.h>
-#include <cstdlib>
+#include "slic3r/GUI/Printer/BambuTunnel.h"
+#include <cstdio>
 #include <cstring>
+#include <cstddef>
+#include <wx/image.h>
+#include <wx/gdicmn.h>
+#include <cstdint>
 
 extern "C"
 {
@@ -47,12 +53,27 @@ int AVVideoDecoder::open(Bambu_StreamInfo const &info)
     return 0;
 }
 
+int AVVideoDecoder::open(AVCodecParameters const &parameters)
+{
+    if (avcodec_parameters_to_context(codec_ctx_, &parameters) < 0)
+        return -1;
+
+    auto codec = avcodec_find_decoder(codec_ctx_->codec_id);
+    if (codec == nullptr) {
+        fprintf(stderr, "AVVideoDecoder: unsupported codec!\n");
+        return -1;
+    }
+    if (avcodec_open2(codec_ctx_, codec, nullptr) < 0) {
+        fprintf(stderr, "AVVideoDecoder: could not open codec\n");
+        return -1;
+    }
+
+    frame_ = av_frame_alloc();
+    return frame_ == nullptr ? -1 : 0;
+}
+
 int AVVideoDecoder::decode(const Bambu_Sample &sample)
 {
-    got_frame_ = false;
-    if (!sample.buffer || sample.size <= 0)
-        return AVERROR_INVALIDDATA;
-
     int ret = -1;
     AVPacket *pkt = av_packet_alloc();
     if (!pkt) {
@@ -74,6 +95,14 @@ int AVVideoDecoder::decode(const Bambu_Sample &sample)
 
     av_packet_unref(pkt);
     av_packet_free(&pkt);
+    return ret;
+}
+
+int AVVideoDecoder::decode(const AVPacket &packet)
+{
+    int ret = avcodec_send_packet(codec_ctx_, &packet);
+    if (ret == 0)
+        got_frame_ = avcodec_receive_frame(codec_ctx_, frame_) == 0;
     return ret;
 }
 
@@ -107,7 +136,8 @@ bool AVVideoDecoder::toWxImage(wxImage &image, wxSize const &size2)
     AVPixelFormat wxFmt = AV_PIX_FMT_RGB24;
     sws_ctx_   = sws_getCachedContext(sws_ctx_,
                                     frame_->width, frame_->height, AVPixelFormat(frame_->format),
-                                    size1.GetWidth(), size1.GetHeight(), wxFmt, SWS_FAST_BILINEAR,
+                                    size1.GetWidth(), size1.GetHeight(), wxFmt,
+                                    SWS_GAUSS,
                                     nullptr, nullptr, nullptr);
     if (sws_ctx_ == nullptr)
         return false;
@@ -120,50 +150,10 @@ bool AVVideoDecoder::toWxImage(wxImage &image, wxSize const &size2)
     if (result_h != size.GetHeight()) {
         return false;
     }
-    image = wxImage(size.GetWidth(), size.GetHeight(), bits_.data(), true);
-    if (!image.IsOk()) {
-        fprintf(stderr, "AVVideoDecoder: image not ok %dx%d\n", size.GetWidth(), size.GetHeight());
-        return false;
-    }
-    return true;
-}
-
-bool AVVideoDecoder::toWxImageOwned(wxImage &image, wxSize const &size2)
-{
-    if (!got_frame_)
-        return false;
-
-    auto size1 = size2;
-    if (!size1.IsFullySpecified())
-        size1 = {frame_->width, frame_->height};
-    auto size = size1;
-    if (size.GetWidth() & 0x0f)
-        size.SetWidth((size.GetWidth() & ~0x0f) + 0x10);
-
-    AVPixelFormat wxFmt = AV_PIX_FMT_RGB24;
-    sws_ctx_ = sws_getCachedContext(sws_ctx_,
-                                    frame_->width, frame_->height, AVPixelFormat(frame_->format),
-                                    size1.GetWidth(), size1.GetHeight(), wxFmt, SWS_FAST_BILINEAR,
-                                    nullptr, nullptr, nullptr);
-    if (sws_ctx_ == nullptr)
-        return false;
-
-    size_t length = size_t(size.GetWidth()) * size_t(size.GetHeight()) * 3;
-    auto *data = static_cast<unsigned char *>(std::malloc(length));
-    if (!data)
-        return false;
-    if (size.GetWidth() != size1.GetWidth())
-        std::memset(data, 0, length);
-
-    uint8_t *datas[] = {data};
-    int strides[] = {size.GetWidth() * 3};
-    int result_h = sws_scale(sws_ctx_, frame_->data, frame_->linesize, 0, frame_->height, datas, strides);
-    if (result_h != size.GetHeight()) {
-        std::free(data);
-        return false;
-    }
-
-    image = wxImage(size.GetWidth(), size.GetHeight(), data, false);
+    // Copy: the frame outlives this decoder and is painted by the GUI thread while the
+    // next sws_scale is already overwriting bits_, so it must own its pixels. The Windows
+    // path below needs no equivalent, wxBitmap copies the bits into GDI.
+    image = wxImage(size.GetWidth(), size.GetHeight(), bits_.data(), true).Copy();
     if (!image.IsOk()) {
         fprintf(stderr, "AVVideoDecoder: image not ok %dx%d\n", size.GetWidth(), size.GetHeight());
         return false;
@@ -190,7 +180,8 @@ bool AVVideoDecoder::toWxBitmap(wxBitmap &bitmap, wxSize const &size2)
     AVPixelFormat wxFmt = AV_PIX_FMT_RGB32;
     sws_ctx_ = sws_getCachedContext(sws_ctx_,
                                     frame_->width, frame_->height, AVPixelFormat(frame_->format),
-                                    size1.GetWidth(), size1.GetHeight(), wxFmt, SWS_FAST_BILINEAR,
+                                    size1.GetWidth(), size1.GetHeight(), wxFmt,
+                                    SWS_GAUSS,
                                     nullptr, nullptr, nullptr);
     if (sws_ctx_ == nullptr)
         return false;

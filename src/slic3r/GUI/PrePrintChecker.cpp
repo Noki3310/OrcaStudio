@@ -1,8 +1,21 @@
 #include "PrePrintChecker.hpp"
-#include "GUI_Utils.hpp"
 #include "I18N.hpp"
+#include <algorithm>
+#include <functional>
 #include <set>
-#include "GUI_App.hpp"
+#include <string>
+#include <wx/string.h>
+#include <wx/panel.h>
+#include <wx/sizer.h>
+#include <wx/wx.h>
+#include <wx/colour.h>
+#include <vector>
+#include "slic3r/GUI/Widgets/Label.hpp"
+#include <wx/event.h>
+#include <wx/gdicmn.h>
+#include <wx/utils.h>
+
+class wxWindow;
 
 
 namespace Slic3r { namespace GUI {
@@ -64,6 +77,7 @@ std::string PrePrintChecker::get_print_status_info(PrintDialogStatus status)
     case PrintStatusRackReading: return "PrintStatusRackReading";
     case PrintStatusRackNozzleNumUnmeetWarning: return "PrintStatusRackNozzleNumUnmeetWarning";
     case PrintStatusHasUnreliableNozzleWarning: return "PrintStatusHasUnreliableNozzleWarning";
+    case PrintStatusOptionalPrinterModel: return "PrintStatusOptionalPrinterModel";
     case PrintStatusWarningExtFilamentNotMatch: return "PrintStatusWarningExtFilamentNotMatch";
     case PrintStatusFilamentWarningNozzleHRC: return "PrintStatusFilamentWarningNozzleHRC";
     case PrintStatusTPUUnsupportCaliOn: return "PrintStatusTPUUnsupportCaliOn";
@@ -105,6 +119,7 @@ wxString PrePrintChecker::get_pre_state_msg(PrintDialogStatus status)
     case PrintStatusNeedConsistencyUpgrading: return _L("Cannot send the print job to a printer whose firmware must be updated.");
     case PrintStatusBlankPlate: return _L("Cannot send a print job for an empty plate.");
     case PrintStatusTimelapseNoSdcard: return _L("Storage needs to be inserted to record timelapse.");
+    case PrintStatusOptionalPrinterModel: return _L("The selected printer model could not be identified, so compatibility with the print file configuration cannot be verified. Please verify the printer preset before sending.");
     case PrintStatusMixAmsAndVtSlotWarning: return _L("You have selected both external and AMS filaments for an extruder. You will need to manually switch the external filament during printing.");
     case PrintStatusTPUUnsupportAutoCali: return _L("TPU 90A/TPU 85A is too soft and does not support automatic Flow Dynamics calibration.");
     case PrintStatusWarningKvalueNotUsed: return _L("Set dynamic flow calibration to 'OFF' to enable custom dynamic flow value.");
@@ -242,9 +257,9 @@ void PrePrintChecker::add_with_checkbox(PrintDialogStatus state, wxString msg, w
         info.type = prePrintInfoType::Filament;
     }
 
-    info.msg               = msg;
-    info.checkbox_label    = checkbox_label;
-    info.checkbox_checked  = checked;
+    info.msg              = msg;
+    info.checkbox_label   = checkbox_label;
+    info.checkbox_checked = checked;
     info.checkbox_callback = checkbox_callback;
 
     switch (info.type) {
@@ -347,7 +362,7 @@ bool PrinterMsgPanel::UpdateInfos(const std::vector<prePrintInfo>& infos)
                 label->SetLabel(info.msg + " " + _L("Please refer to Wiki before use->"));
                 label->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
                 label->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
-                label->Bind(wxEVT_LEFT_DOWN, [info](wxMouseEvent& event) { wxGetApp().open_browser_with_warning_dialog(info.wiki_url); });
+                label->Bind(wxEVT_LEFT_DOWN, [info](wxMouseEvent& event) { wxLaunchDefaultBrowser(info.wiki_url); });
             }
 
             label->Wrap(this->GetMinSize().GetWidth());
@@ -379,5 +394,4 @@ bool PrinterMsgPanel::UpdateInfos(const std::vector<prePrintInfo>& infos)
 
 }
 };
-
 

@@ -7,9 +7,28 @@
 #include "ReleaseNote.hpp"
 #include "wxExtensions.hpp"
 
+#include <unordered_set>
+#include <string>
+#include <wx/gdicmn.h>
+#include "slic3r/GUI/GUI_Utils.hpp"
+#include "libslic3r/Utils.hpp"
+#include "slic3r/GUI/Widgets/Label.hpp"
+#include <wx/event.h>
+#include <boost/log/trivial.hpp>
+#include <wx/image.h>
+#include <utility>
+#include <vector>
+#include "slic3r/GUI/Monitor.hpp"
 #include <wx/mstream.h>
 #include <wx/dcmemory.h>
-#include <exception>
+#include <wx/statbmp.h>
+#include <wx/string.h>
+#include <wx/panel.h>
+#include <wx/scrolwin.h>
+#include <wx/sizer.h>
+#include <wx/webrequest.h>
+#include <wx/timer.h>
+#include <wx/toplevel.h>
 
 namespace Slic3r {
 namespace GUI
@@ -40,7 +59,7 @@ DeviceErrorDialog::DeviceErrorDialog(MachineObject* obj, wxWindow* parent, wxWin
     m_line_top->SetBackgroundColour(wxColour(166, 169, 170));
 
     m_scroll_area = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
-    m_scroll_area->SetScrollRate(0, 5);
+    m_scroll_area->SetScrollRate(0, FromDIP(20));
     m_scroll_area->SetBackgroundColour(*wxWHITE);
     m_scroll_area->SetMinSize(wxSize(FromDIP(320), FromDIP(250)));
 
@@ -349,32 +368,17 @@ wxString DeviceErrorDialog::parse_error_level(int error_code)
     }
 }
 
-static const std::unordered_set<string> s_jump_liveview_error_codes = { "0300-8003", "0300-8002", "0300-800A"};
+static const std::unordered_set<std::string> s_jump_liveview_error_codes = { "0300-8003", "0300-8002", "0300-800A"};
 wxString DeviceErrorDialog::show_error_code(int error_code)
 {
-    if (!m_obj || m_error_code == error_code) { return wxEmptyString;}
-
-    try {
-        if (wxGetApp().get_hms_query()->is_internal_error(m_obj, error_code)) { return wxEmptyString;}
-    } catch (const std::exception& e) {
-        BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::is_internal_error failed: " << e.what();
-    } catch (...) {
-        BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::is_internal_error failed";
-    }
+    if (m_error_code == error_code) { return wxEmptyString;}
+    if (wxGetApp().get_hms_query()->is_internal_error(m_obj, error_code)) { return wxEmptyString;}
 
     /* error code str*/
     std::string error_str = m_obj->get_error_code_str(error_code);
-    m_error_code = error_code;
 
     /* error code message*/
-    wxString error_msg;
-    try {
-        error_msg = wxGetApp().get_hms_query()->query_print_error_msg(m_obj, error_code);
-    } catch (const std::exception& e) {
-        BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::query_print_error_msg failed: " << e.what();
-    } catch (...) {
-        BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::query_print_error_msg failed";
-    }
+    wxString error_msg = wxGetApp().get_hms_query()->query_print_error_msg(m_obj, error_code);
     if (error_msg.IsEmpty()) { error_msg = _L("Unknown error.");}
 
     /* parse error level */
@@ -390,16 +394,7 @@ wxString DeviceErrorDialog::show_error_code(int error_code)
     } else {
         /* action buttons*/
         std::vector<int> used_button;
-        wxString error_image_url;
-        try {
-            error_image_url = wxGetApp().get_hms_query()->query_print_image_action(m_obj, error_code, used_button);
-        } catch (const std::exception& e) {
-            BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::query_print_image_action failed: " << e.what();
-            used_button.clear();
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog::query_print_image_action failed";
-            used_button.clear();
-        }
+        wxString         error_image_url = wxGetApp().get_hms_query()->query_print_image_action(m_obj, error_code, used_button);
         if (s_jump_liveview_error_codes.count(error_str)) { used_button.emplace_back(DeviceErrorDialog::JUMP_TO_LIVEVIEW); } // special case
 
         /* do update*/
@@ -410,6 +405,15 @@ wxString DeviceErrorDialog::show_error_code(int error_code)
     Show();
     Raise();
 
+#ifndef __linux__
+    // Orca: skip RequestUserAttention on Linux/Wayland (urgency-hint deadlock).
+    // On Linux (especially Wayland) RequestUserAttention(wxUSER_ATTENTION_ERROR) maps to
+    // gtk_window_set_urgency_hint(TRUE) which can leave the window in an urgent-but-unfocused
+    // state — clicks no longer reach any widget in the app and the user has to kill the
+    // process to recover. Same root cause as #9874, where SecondaryCheckDialog had its
+    // RequestUserAttention call removed for the identical reason.
+    this->RequestUserAttention(wxUSER_ATTENTION_ERROR);
+#endif
 
     return error_msg;
 }
@@ -433,11 +437,12 @@ void DeviceErrorDialog::update_contents(const wxString& title, const wxString& t
         m_sizer_button->Clear();
         m_used_button.clear();
 
-        // Show the used buttons. HMS notifications must remain dismissible.
+        // Show the used buttons
+        bool need_remove_close_btn = false;
         std::unordered_set<int> shown_btns;
         for (int button_id : btns)
         {
-            if (button_id == REMOVE_CLOSE_BTN) { continue; }
+            need_remove_close_btn |= (button_id == REMOVE_CLOSE_BTN); // special case, do not show close button
 
             auto iter = m_button_list.find(button_id);
             if (iter != m_button_list.end())
@@ -448,7 +453,15 @@ void DeviceErrorDialog::update_contents(const wxString& title, const wxString& t
             }
         }
 
-        SetWindowStyle(GetWindowStyle() | wxCLOSE_BOX);
+        // Special case, do not show close button
+        if (need_remove_close_btn)
+        {
+            SetWindowStyle(GetWindowStyle() & ~wxCLOSE_BOX);
+        }
+        else
+        {
+            SetWindowStyle(GetWindowStyle() | wxCLOSE_BOX);
+        }
 
         // Hide unused buttons
         for (const auto& pair : m_button_list)
@@ -545,7 +558,8 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
         break;
     }
     case DeviceErrorDialog::CHECK_ASSISTANT: {
-        wxGetApp().mainframe->m_monitor->jump_to_HMS(); // go to assistant page
+        if (MonitorPanel* monitor = MonitorPanel::if_built())
+            monitor->jump_to_HMS(); // go to assistant page
         break;
     }
     case DeviceErrorDialog::FILAMENT_EXTRUDED: {
@@ -575,7 +589,8 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
     }
     case DeviceErrorDialog::JUMP_TO_LIVEVIEW: {
         Slic3r::GUI::wxGetApp().mainframe->jump_to_monitor();
-        Slic3r::GUI::wxGetApp().mainframe->m_monitor->jump_to_LiveView();
+        if (MonitorPanel* monitor = MonitorPanel::if_built())
+            monitor->jump_to_LiveView();
         break;
     }
     case DeviceErrorDialog::NO_REMINDER_NEXT_TIME: {
@@ -625,7 +640,8 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
     }
     case DeviceErrorDialog::OK_JUMP_RACK: {
         Slic3r::GUI::wxGetApp().mainframe->jump_to_monitor();
-        Slic3r::GUI::wxGetApp().mainframe->m_monitor->jump_to_Rack();
+        if (MonitorPanel* monitor = MonitorPanel::if_built())
+            monitor->jump_to_Rack();
         break;
     }
     case DeviceErrorDialog::ABORT: {

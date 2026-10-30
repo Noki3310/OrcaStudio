@@ -1,7 +1,6 @@
 #include "PrintJob.hpp"
-#include "libslic3r/MTUtils.hpp"
+#include "libslic3r/LifecycleEvents.hpp"
 #include "libslic3r/Model.hpp"
-#include "libslic3r/PresetBundle.hpp"
 #include "slic3r/GUI/Plater.hpp"
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
@@ -14,6 +13,33 @@
 
 #include "slic3r/Utils/FileTransferUtils.hpp"
 #include "slic3r/Utils/BBLNetworkPlugin.hpp"
+#include "NetworkAgent.hpp"
+#include <string>
+#include "libslic3r/Utils.hpp"
+#include <boost/log/trivial.hpp>
+#include <functional>
+#include <cstddef>
+#include <nlohmann/json.hpp>
+#include <wx/string.h>
+#include "slic3r/GUI/PartPlate.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include <memory>
+#include <exception>
+#include "libslic3r/Format/bbs_3mf.hpp"
+#include <algorithm>
+#include <regex>
+#include <tuple>
+#include <boost/chrono/duration.hpp>
+#include "slic3r/GUI/DeviceCore/DevStorage.h"
+#include <wx/event.h>
+#include "libslic3r/AppConfig.hpp"
+#include "slic3r/GUI/DeviceManager.hpp"
+#include "slic3r/GUI/I18N.hpp"
+#include "slic3r/GUI/Jobs/SendJob.hpp"
+#include <boost/filesystem.hpp>
+
+namespace fs = boost::filesystem;
+using json = nlohmann::json;
 
 namespace Slic3r {
 namespace GUI {
@@ -135,7 +161,6 @@ void PrintJob::process(Ctl &ctl)
 {
     /* display info */
     std::string msg;
-    wxString error_str;
     int curr_percent = 10;
     NetworkAgent* m_agent = wxGetApp().getAgent();
     AppConfig* config = wxGetApp().app_config;
@@ -152,6 +177,18 @@ void PrintJob::process(Ctl &ctl)
 
     int result = -1;
     std::string http_body;
+
+    const auto mark_lifecycle_started = [this]() {
+        if (m_lifecycle_started)
+            return;
+
+        LifecycleEventContext start_ctx;
+        start_ctx.name = m_project_name;
+        start_ctx.device_id = m_dev_id;
+        start_ctx.source = "print_job";
+        fire_lifecycle_event(LifecycleEvent::PrintJobStarted, start_ctx);
+        m_lifecycle_started = true;
+    };
 
     int total_plate_num = plate_data.plate_count;
     if (!plate_data.is_valid) {
@@ -174,7 +211,7 @@ void PrintJob::process(Ctl &ctl)
         }
     }
 
-    m_project_name = truncate_string(m_project_name, 100);
+    const std::string transport_project_name = truncate_string(m_project_name, 100);
     int curr_plate_idx = 0;
 
     if (m_print_type == "from_normal") {
@@ -198,13 +235,13 @@ void PrintJob::process(Ctl &ctl)
         this->task_bed_type = bed_type_to_gcode_string(plate_data.is_valid ? plate_data.bed_type : curr_plate->get_bed_type(true));
     }
 
-    PrintParams params{};
+    PrintParams params;
 
     // local print access
     params.dev_ip = m_dev_ip;
     params.use_ssl_for_ftp  = m_local_use_ssl_for_ftp;
     params.use_ssl_for_mqtt  = m_local_use_ssl;
-    params.username = "bblp";
+    params.username = m_agent->default_lan_username();
     params.password = m_access_code;
 
     // check access code and ip address
@@ -234,11 +271,7 @@ void PrintJob::process(Ctl &ctl)
             ftp_ok = result == 0;
         }
         if (!emmc_ok && !ftp_ok) {
-            bool legacy_mode = false;
-            {
-                auto module_lock = BBLNetworkPlugin::lock_module_for_call();
-                legacy_mode = BBLNetworkPlugin::instance().use_legacy_network();
-            }
+            bool legacy_mode = BBLNetworkPlugin::instance().use_legacy_network();
             BOOST_LOG_TRIVIAL(error) << "LAN connection verification failed:"
                 << " emmc_ok=" << emmc_ok
                 << ", ftp_ok=" << ftp_ok
@@ -281,7 +314,6 @@ void PrintJob::process(Ctl &ctl)
     params.auto_offset_cali     = this->auto_offset_cali;
     params.extruder_cali_manual_mode = this->extruder_cali_manual_mode;
     params.task_ext_change_assist = this->task_ext_change_assist;
-    params.svc_context          = "";
     // Allow disabling the eMMC print path via AppConfig. Plugin 02.03.00.62's
     // eMMC tunnel code hangs indefinitely at the upload phase with some
     // printers (e.g., Bambu H2D), so we default to disabled. Users with
@@ -292,7 +324,7 @@ void PrintJob::process(Ctl &ctl)
         if (v == "0" || v == "false")
             disable_emmc = false;
     }
-    params.try_emmc_print         = this->could_emmc_print && (m_print_type == "from_sdcard_view" || !disable_emmc);
+    params.try_emmc_print         = this->could_emmc_print && !disable_emmc;
 
     if (m_print_type == "from_sdcard_view") {
         params.dst_file = m_dst_path;
@@ -303,7 +335,7 @@ void PrintJob::process(Ctl &ctl)
         auto origin_profile_id = model_info->metadata_items.find(BBL_DESIGNER_PROFILE_ID_TAG);
         if (origin_profile_id != model_info->metadata_items.end()) {
             try {
-                params.origin_profile_id    = stoi(origin_profile_id->second.c_str());
+                params.origin_profile_id    = std::stoi(origin_profile_id->second.c_str());
             }
             catch(...) {}
         }
@@ -338,10 +370,6 @@ void PrintJob::process(Ctl &ctl)
                 } catch (...) {}
             }
         }
-
-        auto svc_context = model_info->metadata_items.find(BBL_SVC_CONTEXT_TAG);
-        if (svc_context != model_info->metadata_items.end())
-            params.svc_context = svc_context->second;
     }
 
     params.stl_design_id = 0;
@@ -382,24 +410,11 @@ void PrintJob::process(Ctl &ctl)
         }
     }
 
-    const auto& model_design_id = wxGetApp().model().design_id;
-    if (params.stl_design_id == 0 || !model_design_id.empty()) {
-        if (model_design_id.empty()) {
-            params.stl_design_id = 0;
-        } else {
-            try {
-                params.stl_design_id = std::stoi(model_design_id);
-            } catch (...) {
-                params.stl_design_id = 0;
-            }
-        }
-    }
-
-    if (params.preset_name.empty() && m_print_type == "from_normal") { params.preset_name = wxString::Format("%s_plate_%d", m_project_name, curr_plate_idx).ToStdString(); }
-    if (params.project_name.empty()) {params.project_name = m_project_name;}
+    if (params.preset_name.empty() && m_print_type == "from_normal") { params.preset_name = wxString::Format("%s_plate_%d", transport_project_name, curr_plate_idx).ToStdString(); }
+    if (params.project_name.empty()) {params.project_name = transport_project_name;}
 
     if (m_is_calibration_task) {
-        params.project_name = m_project_name;
+        params.project_name = transport_project_name;
         params.origin_model_id = "";
     }
 
@@ -424,9 +439,7 @@ void PrintJob::process(Ctl &ctl)
         &is_try_lan_mode,
         &is_try_lan_mode_failed,
         &msg,
-        &error_str,
         &curr_percent,
-        &error_text,
         StagePercentPoint
     ](int stage, int code, std::string info) {
 
@@ -511,19 +524,12 @@ void PrintJob::process(Ctl &ctl)
 
 
     DeviceManager* dev = wxGetApp().getDeviceManager();
-    MachineObject* obj = dev ? dev->get_selected_machine() : nullptr;
-    const std::string wait_dev_id = m_dev_id;
+    MachineObject* obj = dev->get_selected_machine();
 
-    auto wait_fn = [&ctl, obj, wait_dev_id](int state, std::string job_info) {
-            (void)state;
+    auto wait_fn = [&ctl, &obj](int state, std::string job_info) {
             BOOST_LOG_TRIVIAL(info) << "print_job: get_job_info = " << job_info;
 
-            if (!obj || !obj->is_support_wait_sending_finish) {
-                return true;
-            }
-
-            if (wxGetApp().is_bmcu_auto_retry_active(wait_dev_id)) {
-                BOOST_LOG_TRIVIAL(info) << "print_job: BMCU auto retry active, finish wait for dev_id=" << wait_dev_id;
+            if (!obj->is_support_wait_sending_finish) {
                 return true;
             }
 
@@ -535,40 +541,47 @@ void PrintJob::process(Ctl &ctl)
                     curr_job_id = DevJsonValParser::get_longlong_val(job_info_j["job_id"]);
                 }
                 BOOST_LOG_TRIVIAL(trace) << "print_job: curr_obj_id=" << curr_job_id;
+
             } catch(...) {
                 ;
             }
 
-            int time_out = 0;
-            while (time_out < PRINT_JOB_SENDING_TIMEOUT) {
-                BOOST_LOG_TRIVIAL(trace) << "print_job: obj job_id = " << obj->job_id_;
-                if (!obj->job_id_.empty() && obj->job_id_.compare(curr_job_id) == 0) {
-                    BOOST_LOG_TRIVIAL(info) << "print_job: got job_id = " << obj->job_id_ << ", time_out=" << time_out;
-                    return true;
+            if (obj) {
+                int time_out = 0;
+                while (time_out < PRINT_JOB_SENDING_TIMEOUT) {
+                    BOOST_LOG_TRIVIAL(trace) << "print_job: obj job_id = " << obj->job_id_;
+                    if (!obj->job_id_.empty() && obj->job_id_.compare(curr_job_id) == 0) {
+                        BOOST_LOG_TRIVIAL(info) << "print_job: got job_id = " << obj->job_id_ << ", time_out=" << time_out;
+                        return true;
+                    }
+                    if (obj->is_in_printing_status(obj->print_status)) {
+                        BOOST_LOG_TRIVIAL(info) << "print_job: printer has enter printing status, s = " << obj->print_status;
+                        return true;
+                    }
+                    // Break the wait-for-print-start loop on user cancel.
+                    if (ctl.was_canceled()) {
+                        BOOST_LOG_TRIVIAL(info) << "print_job: user cancel the job " << obj->job_id_;
+                        return true;
+                    }
+                    time_out++;
+                    boost::this_thread::sleep_for(boost::chrono::milliseconds(1000));
                 }
-                if (obj->is_in_printing_status(obj->print_status)) {
-                    BOOST_LOG_TRIVIAL(info) << "print_job: printer has enter printing status, s = " << obj->print_status;
-                    return true;
-                }
-                if (ctl.was_canceled()) {
-                    BOOST_LOG_TRIVIAL(info) << "print_job: user cancel the job " << obj->job_id_;
-                    return true;
-                }
-                if (wxGetApp().is_bmcu_auto_retry_active(wait_dev_id)) {
-                    BOOST_LOG_TRIVIAL(info) << "print_job: BMCU auto retry active, finish wait for dev_id=" << wait_dev_id;
-                    return true;
-                }
-                ++time_out;
-                boost::this_thread::sleep_for(boost::chrono::milliseconds(1000));
+                //this->update_status(curr_percent, _L("Print task sending times out."));
+                //m_plater->update_print_error_info(BAMBU_NETWORK_ERR_TIMEOUT, wait_sending_finish.ToStdString(), desc_wait_sending_finish.ToStdString());
+                BOOST_LOG_TRIVIAL(info) << "print_job: timeout, cancel the job" << obj->job_id_;
+                /* handle tiemout */
+                //obj->command_task_cancel(curr_job_id);
+                //return false;
+                return true;
             }
-
-            BOOST_LOG_TRIVIAL(info) << "print_job: timeout, cancel the job" << obj->job_id_;
+            BOOST_LOG_TRIVIAL(info) << "print_job: obj is null";
             return true;
     };
 
     if (m_print_type == "from_sdcard_view") {
         BOOST_LOG_TRIVIAL(info) << "print_job: try to send with cloud, model is sdcard view";
         ctl.update_status(curr_percent, _u8L("Sending print job through cloud service"));
+        mark_lifecycle_started();
         result = m_agent->start_sdcard_print(params, update_fn, cancel_fn);
     } else if (params.connection_type != "lan") {
         if (params.dev_ip.empty())
@@ -592,6 +605,7 @@ void PrintJob::process(Ctl &ctl)
                 BOOST_LOG_TRIVIAL(info) << "print_job: use ftp send print only";
                 ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
                 is_try_lan_mode = true;
+                mark_lifecycle_started();
                 result = m_agent->start_local_print_with_record(params, update_fn, cancel_fn, wait_fn);
                 if (result < 0) {
                     error_text = wxString::Format(_L("Access code:%s IP address:%s"), params.password, params.dev_ip);
@@ -608,6 +622,7 @@ void PrintJob::process(Ctl &ctl)
                 // try to send local with record
                 BOOST_LOG_TRIVIAL(info) << "print_job: try to start local print with record";
                 ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
+                mark_lifecycle_started();
                 result = m_agent->start_local_print_with_record(params, update_fn, cancel_fn, wait_fn);
                 if (result == 0) {
                     params.comments = "";
@@ -623,18 +638,21 @@ void PrintJob::process(Ctl &ctl)
                     // try to send with cloud
                     BOOST_LOG_TRIVIAL(warning) << "print_job: try to send with cloud";
                     ctl.update_status(curr_percent, _u8L("Sending print job through cloud service"));
+                    // Started was already emitted before the local attempt.
                     result = m_agent->start_print(params, update_fn, cancel_fn, wait_fn);
                 }
             }
             else {
                 BOOST_LOG_TRIVIAL(info) << "print_job: send with cloud";
                 ctl.update_status(curr_percent, _u8L("Sending print job through cloud service"));
+                mark_lifecycle_started();
                 result = m_agent->start_print(params, update_fn, cancel_fn, wait_fn);
             }
         }
     } else {
         if (this->could_emmc_print) {
             ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
+            mark_lifecycle_started();
             result = m_agent->start_local_print(params, update_fn, cancel_fn);
         } else {
             switch(this->sdcard_state) {
@@ -645,6 +663,7 @@ void PrintJob::process(Ctl &ctl)
                     if(this->has_sdcard) {
                         // means the storage is abnormal but can be used option is enabled
                         ctl.update_status(curr_percent, _u8L("Sending print job over LAN, but the Storage in the printer is abnormal and print-issues may be caused by this."));
+                        mark_lifecycle_started();
                         result = m_agent->start_local_print(params, update_fn, cancel_fn);
                         break;
                     }
@@ -655,6 +674,7 @@ void PrintJob::process(Ctl &ctl)
                     return;
                 case DevStorage::SdcardState::HAS_SDCARD_NORMAL:
                     ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
+                    mark_lifecycle_started();
                     result = m_agent->start_local_print(params, update_fn, cancel_fn);
                     break;
                 default:
@@ -712,6 +732,7 @@ void PrintJob::process(Ctl &ctl)
         }
         wxQueueEvent(m_plater, evt);
         m_job_finished = true;
+        m_lifecycle_success = true;
     }
 }
 
@@ -722,6 +743,19 @@ void PrintJob::finalize(bool canceled, std::exception_ptr &eptr) {
         eptr = nullptr;
     } catch (...) {
         eptr = std::current_exception();
+    }
+
+    if (m_lifecycle_started && !m_lifecycle_finished) {
+        LifecycleEventContext finish_ctx;
+        finish_ctx.name = m_project_name;
+        finish_ctx.device_id = m_dev_id;
+        finish_ctx.source = "print_job";
+        finish_ctx.code = canceled ? LifecycleEvtCode::Warn :
+            (eptr || !m_lifecycle_success ? LifecycleEvtCode::Error : LifecycleEvtCode::Ok);
+        finish_ctx.msg = canceled ? "cancelled" : (eptr ? "exception" :
+            (m_lifecycle_success ? "" : "failed"));
+        fire_lifecycle_event(LifecycleEvent::PrintJobFinished, finish_ctx);
+        m_lifecycle_finished = true;
     }
 
     if (canceled || eptr)

@@ -9,12 +9,31 @@
 #include "slic3r/GUI/I18N.hpp" // Orca: explicit _L() catalog include
 
 #include <chrono>
+#include <memory>
+#include "libslic3r/PresetBundle.hpp"
+#include <map>
 #include <optional>
+#include <wx/panel.h>
+#include <wx/string.h>
+#include <string>
+#include <wx/event.h>
+#include <vector>
+#include "slic3r/GUI/GUI_Utils.hpp"
+#include <wx/gdicmn.h>
+#include <wx/simplebook.h>
+#include "slic3r/GUI/Widgets/ComboBox.hpp"
+#include "slic3r/GUI/Widgets/Button.hpp"
+#include <wx/timer.h>
+#include "slic3r/GUI/DeviceCore/DevDefs.h"
+#include <unordered_map>
+#include <wx/colour.h>
+#include <wx/scrolwin.h>
 #include <wx/choice.h>
 
 
 //Previous defintions
 class wxGrid;
+class ProgressBar;
 
 namespace Slic3r {
 
@@ -56,7 +75,6 @@ private:
 
     Label* m_text_label;
     wxStaticBitmap* m_icon_bitmap;
-    int m_target_size;
     std::string m_icon_name;
     ScalableBitmap m_icon;
 };
@@ -99,12 +117,6 @@ private:
     wxSimplebook* m_main_simplebook{nullptr};
     wxPanel* m_original_page{nullptr};
 
-    wxWindow* m_amswin{nullptr};
-    wxBoxSizer* m_sizer_ams_items{nullptr};
-    wxScrolledWindow* m_panel_prv_left {nullptr};
-    wxScrolledWindow* m_panel_prv_right{nullptr};
-    wxBoxSizer* m_sizer_prv_left{nullptr};
-    wxBoxSizer* m_sizer_prv_right{nullptr};
 
     // left panel related members
     ScalableBitmap m_humidity_image;

@@ -8,8 +8,6 @@
 #include <utility>
 #include <cstring>
 #include <memory>
-#include <mutex>
-#include <condition_variable>
 #include <boost/log/trivial.hpp>
 
 #ifdef _WIN32
@@ -91,7 +89,6 @@ using fn_ft_job_get_result    = ft_err(FT_CALL *)(FT_JobHandle *, uint32_t timeo
 using fn_ft_tunnel_start_job  = ft_err(FT_CALL *)(FT_TunnelHandle *, FT_JobHandle *);
 using fn_ft_job_cancel        = ft_err(FT_CALL *)(FT_JobHandle *);
 
-using fn_ft_job_msg_destroy = void(FT_CALL *)(ft_job_msg *);
 using fn_ft_job_set_msg_cb  = ft_err(FT_CALL *)(FT_JobHandle *, void(FT_CALL *)(void *user, ft_job_msg msg), void *user);
 using fn_ft_job_try_get_msg = ft_err(FT_CALL *)(FT_JobHandle *, ft_job_msg *out_msg);
 using fn_ft_job_get_msg     = ft_err(FT_CALL *)(FT_JobHandle *, uint32_t timeout_ms, ft_job_msg *out_msg);
@@ -142,7 +139,7 @@ public:
     using ConnectionCb   = std::function<void(bool is_success, int err_code, std::string error_msg)>;
     using TunnelStatusCb = std::function<void(int old_status, int new_status, int err_code, std::string error_msg)>;
 
-    explicit FileTransferTunnel(std::shared_ptr<FileTransferModule> m, const std::string &url);
+    explicit FileTransferTunnel(FileTransferModule &m, const std::string &url);
     ~FileTransferTunnel() { reset(); }
 
     FileTransferTunnel(const FileTransferTunnel &)            = delete;
@@ -157,24 +154,24 @@ public:
 
     void shutdown();
 
-    int get_status() const;
-    bool check_valid() const;
-    FT_TunnelHandle *native() const noexcept;
+    int              get_status() const { return status_; }
+    bool             check_valid() const { return h_ != nullptr; }
+    FT_TunnelHandle *native() const noexcept { return h_; }
 
 private:
-    bool enter_callback() noexcept;
-    void leave_callback() noexcept;
-    void reset() noexcept;
+    void reset() noexcept
+    {
+        if (h_) {
+            m_->ft_tunnel_release(h_);
+            h_ = nullptr;
+        }
+    }
 
-    mutable std::mutex                  mutex_;
-    std::condition_variable             callback_cv_;
-    std::size_t                         active_callbacks_{};
-    bool                                closing_{};
-    int                                 status_{};
-    std::shared_ptr<FileTransferModule> m_;
-    FT_TunnelHandle                    *h_{};
-    ConnectionCb                        conn_cb_{};
-    TunnelStatusCb                      status_cb_{};
+    int                 status_{};
+    FileTransferModule *m_{};
+    FT_TunnelHandle    *h_{};
+    ConnectionCb        conn_cb_{};
+    TunnelStatusCb      status_cb_{};
 };
 
 class FileTransferJob
@@ -183,7 +180,7 @@ public:
     using ResultCb = std::function<void(int res, int resp_ec, std::string json_res, std::vector<std::byte> bin_res)>;
     using MsgCb = std::function<void(int kind, std::string json)>;
 
-    explicit FileTransferJob(std::shared_ptr<FileTransferModule> m, const std::string &params_json);
+    explicit FileTransferJob(FileTransferModule &m, const std::string &params_json);
     ~FileTransferJob() { reset(); }
 
     FileTransferJob(const FileTransferJob &)            = delete;
@@ -203,68 +200,55 @@ public:
 
     bool get_msg(uint32_t timeout_ms, int &kind, std::string &json);
 
-    FT_JobHandle *native() const noexcept;
-    bool check_valid() const;
-    bool finished() const;
-    void cancel();
+    FT_JobHandle *native() const noexcept { return h_; }
+    bool          check_valid() const { return h_ != nullptr; }
+    bool          finished() const { return finished_; }
+
+    void cancel()
+    {
+        if (m_->ft_job_cancel && h_) m_->ft_job_cancel(h_);
+    }
 
 private:
-    bool enter_callback() noexcept;
-    void leave_callback() noexcept;
-    void reset() noexcept;
-    void solve_result_locked(const ft_job_result &result);
+    void reset() noexcept
+    {
+        if (h_) {
+            m_->ft_job_release(h_);
+            h_ = nullptr;
+        }
+    }
 
-    mutable std::mutex                  mutex_;
-    std::condition_variable             callback_cv_;
-    std::size_t                         active_callbacks_{};
-    bool                                closing_{};
-    std::shared_ptr<FileTransferModule> m_;
-    FT_JobHandle                       *h_{};
-    ResultCb                            result_cb_{};
-    MsgCb                               msg_cb_{};
-    bool                                finished_ = false;
-    int                                 res_      = 0;
-    int                                 resp_ec_  = 0;
-    std::string                         res_json_;
-    std::vector<std::byte>              res_bin_;
+    void solve_result(ft_job_result result);
+
+    FileTransferModule    *m_{};
+    FT_JobHandle          *h_{};
+    ResultCb               result_cb_{};
+    MsgCb                  msg_cb_{};
+    bool                   finished_ = false;
+    int                    res_      = 0;
+    int                    resp_ec_  = 0;
+    std::string            res_json_;
+    std::vector<std::byte> res_bin_;
 };
 
 namespace detail {
-inline std::mutex g_mod_mutex;
-inline std::shared_ptr<FileTransferModule> g_mod;
+inline FileTransferModule *g_mod = nullptr;
 }
 
 inline void InitFTModule(ModuleHandle networking_module, int abi_required = 1)
 {
-    std::lock_guard<std::mutex> lock(detail::g_mod_mutex);
     if (detail::g_mod) throw std::runtime_error("Slic3r::InitFTModule called twice");
-    detail::g_mod = std::make_shared<FileTransferModule>(networking_module, abi_required);
+    detail::g_mod = new FileTransferModule(networking_module, abi_required);
 }
-inline bool UnloadFTModule() noexcept
+inline void UnloadFTModule() noexcept
 {
-    std::lock_guard<std::mutex> lock(detail::g_mod_mutex);
-    if (!detail::g_mod)
-        return true;
-    if (detail::g_mod.use_count() != 1)
-        return false;
-    detail::g_mod.reset();
-    return true;
+    delete detail::g_mod;
+    detail::g_mod = nullptr;
 }
-inline bool HasActiveFTObjects() noexcept
+inline FileTransferModule &module()
 {
-    std::lock_guard<std::mutex> lock(detail::g_mod_mutex);
-    return detail::g_mod && detail::g_mod.use_count() != 1;
-}
-inline bool IsFTModuleInitialized() noexcept
-{
-    std::lock_guard<std::mutex> lock(detail::g_mod_mutex);
-    return static_cast<bool>(detail::g_mod);
-}
-inline std::shared_ptr<FileTransferModule> module()
-{
-    std::lock_guard<std::mutex> lock(detail::g_mod_mutex);
     if (!detail::g_mod) throw std::runtime_error("Slic3r::FTModule not initialized. Call Init() first.");
-    return detail::g_mod;
+    return *detail::g_mod;
 }
 
 } // namespace Slic3r

@@ -4,11 +4,11 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Thread.hpp"
 #include "libslic3r/Color.hpp"
+#include "FilamentBitmapUtils.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "GUI_Preview.hpp"
 #include "MainFrame.hpp"
-#include "format.hpp"
 #include "Widgets/ProgressDialog.hpp"
 #include "Widgets/RoundedRectangle.hpp"
 #include "Widgets/StaticBox.hpp"
@@ -20,6 +20,7 @@
 #include "Jobs/PlaterWorker.hpp"
 
 #include "DeviceCore/DevConfig.h"
+#include "DeviceCore/DevConfigUtil.h"
 #include "DeviceCore/DevNozzleSystem.h"
 #include "DeviceCore/DevNozzleRack.h"
 #include "DeviceCore/DevExtensionTool.h"
@@ -36,18 +37,107 @@
 #include "BackgroundSlicingProcess.hpp"   // complete type for background_process().get_current_gcode_result()
 #include "DeviceCore/DevStorage.h"
 
+#include <wx/event.h>
+#include <string>
+#include "libslic3r/PrintConfig.hpp"
+#include <cassert>
+#include <vector>
+#include "slic3r/GUI/GUI_Utils.hpp"
+#include <wx/gdicmn.h>
+#include "slic3r/GUI/AmsMappingPopup.hpp"
+#include "libslic3r/ProjectTask.hpp"
+#include <wx/panel.h>
+#include "slic3r/GUI/wxExtensions.hpp"
+#include "slic3r/GUI/Widgets/TextInput.hpp"
+#include "slic3r/GUI/PrePrintChecker.hpp"
+#include "slic3r/GUI/DeviceTab/uiAMSBestPositionPopup.hpp"
+#include <wx/anybutton.h>
+#include "slic3r/GUI/Widgets/Button.hpp"
+#include <memory>
+#include "slic3r/GUI/BBLStatusBarPrint.hpp"
+#include "slic3r/GUI/Widgets/HyperLink.hpp"
+#include "slic3r/GUI/DeviceCore/DevDefs.h"
+#include <wx/busycursor.h>
+#include <boost/log/trivial.hpp>
+#include <cstdio>
+#include <cstddef>
+#include "libslic3r/Config.hpp"
+#include <nlohmann/json.hpp>
+#include <exception>
+#include <cstdlib>
+#include <map>
+#include <ctime>
+#include <set>
+#include "slic3r/GUI/DeviceManager.hpp"
+#include <optional>
+#include <cmath>
+#include "libslic3r/GCode/GCodeProcessor.hpp"
+#include <wx/chartype.h>
+#include <unordered_set>
+#include "libslic3r/CommonDefs.hpp"
+#include "slic3r/GUI/ReleaseNote.hpp"
+#include <boost/algorithm/string/case_conv.hpp>
+#include "slic3r/GUI/Widgets/StateColor.hpp"
+#include <wx/dcclient.h>
+#include "libslic3r/Print.hpp"
+#include <wx/dialog.h>
+#include <utility>
+#include "slic3r/GUI/Monitor.hpp"
+#include <ostream>
+#include "slic3r/GUI/Jobs/PrintJob.hpp"
+#include "slic3r/GUI/MsgDialog.hpp"
+#include "slic3r/GUI/Jobs/Worker.hpp"
+#include <wx/arrstr.h>
+#include "slic3r/GUI/Auxiliary.hpp"
+#include <cstring>
+#include "libslic3r/PrintBase.hpp"
+#include "slic3r/GUI/PartPlate.hpp"
+#include "slic3r/GUI/3DScene.hpp"
+#include <wx/image.h>
+#include <wx/dcmemory.h>
+#include <wx/dc.h>
+#include "slic3r/GUI/Widgets/DropDown.hpp"
 #include <wx/progdlg.h>
 #include <wx/clipbrd.h>
 #include <wx/dcgraph.h>
 #include <wx/mstream.h>
 #include <miniz.h>
 #include <algorithm>
-#include <atomic>
 #include <unordered_map>
+#include <wx/wx.h>
+#include <wx/toplevel.h>
+#include <wx/simplebook.h>
+#include <wx/string.h>
+#include <wx/stattext.h>
+#include <wx/textctrl.h>
+#include <wx/sizer.h>
+#include <wx/timer.h>
+#include <wx/tglbtn.h>
+#include <wx/wxcrt.h>
+#include <wx/utils.h>
 #include "Plater.hpp"
 #include "Notebook.hpp"
 #include "BitmapCache.hpp"
 #include "BindDialog.hpp"
+#include "slic3r/GUI/DeviceCore/DevUtil.h"
+#include "libslic3r/AppConfig.hpp"
+#include "libslic3r/Format/bbs_3mf.hpp"
+#include "libslic3r/GCode/ThumbnailData.hpp"
+#include "libslic3r/GCode/ToolOrdering.hpp"
+#include "libslic3r/Preset.hpp"
+#include "libslic3r/PresetBundle.hpp"
+#include "slic3r/GUI/Jobs/BindJob.hpp"
+#include "slic3r/GUI/Tabbook.hpp"
+#include "slic3r/GUI/Widgets/ComboBox.hpp"
+#include "slic3r/GUI/Widgets/PopupWindow.hpp"
+#include "slic3r/Utils/NetworkAgent.hpp"
+#include <boost/filesystem.hpp>
+
+using json = nlohmann::json;
+
+namespace Slic3r { class PrintBase; }
+
+namespace fs = boost::filesystem;
 
 namespace Slic3r { namespace GUI {
 
@@ -75,6 +165,9 @@ std::string get_nozzle_volume_type_cloud_string(NozzleVolumeType nozzle_volume_t
     else if (nozzle_volume_type == NozzleVolumeType::nvtTPUHighFlow) {
         return "tpu_high_flow";
     }
+    else if (nozzle_volume_type == NozzleVolumeType::nvtE3DHighFlow) {
+        return "e3d_high_flow";
+    }
     else if (nozzle_volume_type == NozzleVolumeType::nvtHybrid) {
         // to be supported
         return "hybrid_flow";
@@ -89,7 +182,7 @@ std::string get_nozzle_volume_type_cloud_string(NozzleVolumeType nozzle_volume_t
 static int s_nozzle_mapping_last_request_time = 0;
 
 std::vector<wxString> SelectMachineDialog::MACHINE_BED_TYPE_STRING;
-std::vector<string> SelectMachineDialog::MachineBedTypeString;
+std::vector<std::string> SelectMachineDialog::MachineBedTypeString;
 void                SelectMachineDialog::init_machine_bed_types()
 {
     if (MACHINE_BED_TYPE_STRING.size() == 0) {
@@ -148,7 +241,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
 
     wxBoxSizer* m_scroll_sizer = new wxBoxSizer(wxVERTICAL);
     m_scroll_area              = new wxScrolledWindow(this);
-    m_scroll_area->SetScrollRate(0, 20);
+    m_scroll_area->SetScrollRate(0, FromDIP(20));
     m_scroll_area->SetBackgroundColour(m_colour_def_color);
     m_scroll_area->SetMinSize(wxSize(FromDIP(700), FromDIP(600)));
     m_scroll_area->SetMaxSize(wxSize(FromDIP(700), FromDIP(600)));
@@ -483,7 +576,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
 
     m_link_edit_nozzle->Bind(wxEVT_LEFT_DOWN, [this](auto &e) {
 
-        if (this && this->m_is_in_sending_mode) {
+        if (m_is_in_sending_mode) {
             return;
         }
 
@@ -707,7 +800,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     //show bind failed info
     m_sw_print_failed_info = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxSize(SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2.x, FromDIP(125)), wxVSCROLL);
     m_sw_print_failed_info->SetBackgroundColour(*wxWHITE);
-    m_sw_print_failed_info->SetScrollRate(0, 5);
+    m_sw_print_failed_info->SetScrollRate(0, FromDIP(20));
     m_sw_print_failed_info->SetMinSize(wxSize(SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2.x, FromDIP(125)));
     m_sw_print_failed_info->SetMaxSize(wxSize(SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2.x, FromDIP(125)));
 
@@ -853,7 +946,7 @@ void SelectMachineDialog::init_bind()
             if (!obj) return;
 
             if (obj->get_dev_id() == e.GetString()) {
-                m_printer_box->SetPrinterName(wxString::FromUTF8(obj->get_dev_name()) + "(LAN)");
+                m_printer_box->SetPrinterName(wxString::FromUTF8(obj->get_dev_name()) + _L("(LAN)"));
             }
         }
     });
@@ -1040,7 +1133,7 @@ void SelectMachineDialog::sync_ams_mapping_result(std::vector<FilamentInfo> &res
     if (result.empty()) {
         BOOST_LOG_TRIVIAL(info) << "ams_mapping result is empty";
         for (auto it = m_materialList.begin(); it != m_materialList.end(); it++) {
-            wxString ams_id = "Ext";//
+            wxString ams_id = _L("Ext");//
             wxColour ams_col = wxColour(0xCE, 0xCE, 0xCE);
             it->second->item->set_ams_info(ams_col, ams_id);
             it->second->item->set_nozzle_info(get_mapped_nozzle_str(it->first));
@@ -1064,7 +1157,7 @@ void SelectMachineDialog::sync_ams_mapping_result(std::vector<FilamentInfo> &res
 
                 if (f->tray_id == VIRTUAL_TRAY_MAIN_ID || f->tray_id == VIRTUAL_TRAY_DEPUTY_ID)
                 {
-                    ams_id = "Ext";
+                    ams_id = _L("Ext");
                 }else if (f->tray_id >= 0) {
                     ams_id = wxGetApp().transition_tridid(f->tray_id);
                 } else {
@@ -1089,8 +1182,8 @@ void SelectMachineDialog::sync_ams_mapping_result(std::vector<FilamentInfo> &res
         }
     }
     relayout_nozzle_cards();
-    auto tab_index = (MainFrame::TabPosition) dynamic_cast<Notebook *>(wxGetApp().tab_panel())->GetSelection();
-    if (tab_index == MainFrame::TabPosition::tp3DEditor || tab_index == MainFrame::TabPosition::tpPreview) {
+    wxString tab_name = wxGetApp().tab_panel()->GetSelectedPageName();
+    if (tab_name == TAB_ID_PREPARE || tab_name == TAB_ID_PREVIEW) {
         updata_thumbnail_data_after_connected_printer();
     }
 }
@@ -1125,7 +1218,10 @@ bool SelectMachineDialog::do_ams_mapping(MachineObject *obj_,bool use_ams)
 
     int filament_result = 0;
     std::vector<bool> map_opt;  //four values: use_left_ams, use_right_ams, use_left_ext, use_right_ext
-    if (nozzle_nums > 1){
+    // Orca: only do the per-physical-extruder left/right split when the device actually reports
+    // 2+ extruders. A non-BBL multi-nozzle printer (e.g. Snapmaker U1) reports a single extruder
+    // with one filament pool, so it maps as a single surface via the else branch below.
+    if (nozzle_nums > 1 && obj_->GetExtderSystem()->GetTotalExtderCount() > 1){
         //get nozzle property, the extders are same?
         if (true/*!can_hybrid_mapping(obj_get_extder_data())*/){
             std::vector<FilamentInfo>           m_ams_mapping_result_left, m_ams_mapping_result_right;
@@ -2176,7 +2272,7 @@ void SelectMachineDialog::on_reselect_dialog_btn_clicked(wxMouseEvent&)
                 best_pos_map[slot.id] = pos.value();
         }
     }
-    m_best_pos_dialog->Update(obj, best_pos_map, m_ams_mapping_result, text);
+    m_best_pos_dialog->UpdateInfo(obj, best_pos_map, m_ams_mapping_result, text);
     m_best_pos_dialog->ShowModal();
 }
 
@@ -2201,7 +2297,7 @@ void SelectMachineDialog::update_best_pos_dialog(wxCommandEvent& evt)
                 best_pos_map[slot.id] = pos.value();
         }
     }
-    m_best_pos_dialog->Update(obj_, best_pos_map, m_ams_mapping_result, text);
+    m_best_pos_dialog->UpdateInfo(obj_, best_pos_map, m_ams_mapping_result, text);
 }
 
 void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxString> params, wxString wiki_url)
@@ -2284,9 +2380,7 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
         // Fill the real per-printer max color count into the %s template.
         if (!params.empty())
             msg = wxString::Format(m_pre_print_checker.get_pre_state_msg(status), params[0], params[0]);
-    }
-
-    else if (status == PrintDialogStatus::PrintStatusAmsMappingU0Invalid) {
+    } else if (status == PrintDialogStatus::PrintStatusAmsMappingU0Invalid) {
         wxString msg_text;
         if (params.size() > 1)
             msg_text = wxString::Format(_L("Filament %s does not match the filament in AMS slot %s. Please update the printer firmware to support AMS slot assignment."), params[0], params[1]);
@@ -2312,8 +2406,10 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintDialogStatus::PrintStatusNoSdcard) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
-    }else if (status == PrintDialogStatus::PrintStatusUnsupportedPrinter) {
+    } else if (status == PrintDialogStatus::PrintStatusUnsupportedPrinter ||
+              status == PrintDialogStatus::PrintStatusOptionalPrinterModel) {
         wxString msg_text;
+        const bool block_send = status == PrintDialogStatus::PrintStatusUnsupportedPrinter;
         try
         {
             DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
@@ -2339,17 +2435,21 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
 
             auto target_print_name = wxString(DevPrinterConfigUtil::get_printer_display_name(target_model_id));
             target_print_name.Replace(wxT("Bambu Lab "), wxEmptyString);
-            msg_text = wxString::Format(_L("The selected printer (%s) is incompatible with the print file configuration (%s). Please adjust the printer preset in the prepare page or choose a compatible printer on this page."), sourcet_print_name, target_print_name);
+            if (block_send) {
+                msg_text = wxString::Format(_L("The selected printer (%s) is incompatible with the print file configuration (%s). Please adjust the printer preset in the prepare page or choose a compatible printer on this page."), sourcet_print_name, target_print_name);
+            } else {
+                msg_text = wxString::Format(_L("The selected printer (%s) has an unknown model, so compatibility with the print file configuration (%s) cannot be verified. Please verify the printer preset before sending."), sourcet_print_name, target_print_name);
+            }
 
 
             msg = msg_text;
             Enable_Refresh_Button(true);
-            Enable_Send_Button(false);
+            Enable_Send_Button(!block_send);
         }
         catch (...)
         {
             Enable_Refresh_Button(true);
-            Enable_Send_Button(false);
+            Enable_Send_Button(!block_send);
         }
 
 
@@ -2501,7 +2601,6 @@ void SelectMachineDialog::on_cancel(wxCloseEvent &event)
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
 
-    stop_auto_retry_0500_409d(true);
     if (m_timelapse_check_timer)
         m_timelapse_check_timer->Stop();
 
@@ -2511,31 +2610,13 @@ void SelectMachineDialog::on_cancel(wxCloseEvent &event)
 
 bool SelectMachineDialog::is_blocking_printing(MachineObject* obj_)
 {
-    DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
-    if (!dev) return true;
-    auto target_model = obj_->printer_type;
-    std::string source_model = "";
+    if (m_print_type == PrintFromType::FROM_NORMAL)
+        return wxGetApp().is_blocking_printing(obj_);
 
-    if (m_print_type == PrintFromType::FROM_NORMAL) {
-        PresetBundle* preset_bundle = wxGetApp().preset_bundle;
-        source_model = preset_bundle->printers.get_edited_preset().get_printer_type(preset_bundle);
-
-
-    }else if (m_print_type == PrintFromType::FROM_SDCARD_VIEW) {
-        if (m_required_data_plate_data_list.size() > 0) {
-            source_model = m_required_data_plate_data_list[m_print_plate_idx]->printer_model_id;
-        }
-    }
-
-    if (source_model != target_model) {
-        std::vector<std::string> compatible_machine = obj_->get_compatible_machine();
-        vector<std::string>::iterator it = find(compatible_machine.begin(), compatible_machine.end(), source_model);
-        if (it == compatible_machine.end()) {
-            return true;
-        }
-    }
-
-    return false;
+    std::string source_model;
+    if (m_print_type == PrintFromType::FROM_SDCARD_VIEW && !m_required_data_plate_data_list.empty())
+        source_model = m_required_data_plate_data_list[m_print_plate_idx]->printer_model_id;
+    return wxGetApp().is_blocking_printing(obj_, source_model);
 }
 
 static std::unordered_set<int> _get_used_nozzle_idxes()
@@ -2623,6 +2704,10 @@ bool SelectMachineDialog::is_same_printer_model()
     if(preset_bundle == nullptr) return result;
     const auto source_model = preset_bundle->printers.get_edited_preset().get_printer_type(preset_bundle);
     const auto target_model = obj_->printer_type;
+    if (DevPrinterConfigUtil::is_optional_printer_model_id(source_model) ||
+        DevPrinterConfigUtil::is_optional_printer_model_id(target_model)) {
+        return true;
+    }
     // Orca: ignore P1P -> P1S
     if (source_model != target_model) {
         if ((source_model == "C12" && target_model == "C11") || (source_model == "C11" && target_model == "C12") ||
@@ -2663,8 +2748,8 @@ void SelectMachineDialog::on_ok_btn(wxCommandEvent &event)
     std::vector<ConfirmBeforeSendInfo> confirm_text;
 
     // check more than one using in same external spool
-    std::unordered_set<string> main_external_spool_filas;
-    std::unordered_set<string> deputy_external_spool_filas;
+    std::unordered_set<std::string> main_external_spool_filas;
+    std::unordered_set<std::string> deputy_external_spool_filas;
     for (const auto& mapping_info : m_ams_mapping_result) {
         if (mapping_info.ams_id == VIRTUAL_AMS_MAIN_ID_STR){
             main_external_spool_filas.insert(mapping_info.filament_id);
@@ -2848,7 +2933,7 @@ void SelectMachineDialog::on_ok_btn(wxCommandEvent &event)
             });
 
         // STUDIO-9580
-        /* use warning color if there are warning and normal messages* /
+        /* use warning color if there are warning and normal messages*/
         /* use indexes if there are several messages*/
         /* add header and ending if there are several messages or has none block warnings*/
         if (confirm_text.size() > 1 || !is_printing_block)
@@ -3074,7 +3159,7 @@ static bool _HasExt(const std::vector<FilamentInfo> &ams_mapping_result) {
     };
 
     for (const auto &info : ams_mapping_result) {
-        if (info.ams_id == VIRTUAL_AMS_MAIN_ID_STR || info.ams_id == VIRTUAL_AMS_DEPUTY_ID_STR && !info.ams_id.empty()) {
+        if (info.ams_id == VIRTUAL_AMS_MAIN_ID_STR || (info.ams_id == VIRTUAL_AMS_DEPUTY_ID_STR && !info.ams_id.empty())) {
             return true;
         }
     }
@@ -3167,130 +3252,6 @@ void SelectMachineDialog::Enable_Auto_Refill(bool enable)
         m_ams_backup_tip->SetForegroundColour(wxColour(0x90, 0x90, 0x90));
     }
     m_ams_backup_tip->Refresh();
-}
-
-
-namespace {
-constexpr int BMCU_AUTO_RETRY_COUNTDOWN_SECONDS = 3;
-constexpr int BMCU_AUTO_RETRY_MAX_ATTEMPTS = 3;
-constexpr int BMCU_AUTO_RETRY_MAX_READY_CHECKS = 20;
-}
-
-void SelectMachineDialog::schedule_auto_retry_0500_409d(const std::string& dev_id)
-{
-    if (m_auto_retry_0500_409d_exhausted || m_auto_retry_0500_409d_attempts >= BMCU_AUTO_RETRY_MAX_ATTEMPTS) {
-        return;
-    }
-
-    m_auto_retry_0500_409d_dev_id = dev_id.empty() ? m_printer_last_select : dev_id;
-    m_auto_retry_0500_409d_ready_checks = 0;
-    m_auto_retry_0500_409d_wait_left = BMCU_AUTO_RETRY_COUNTDOWN_SECONDS;
-    m_auto_retry_0500_409d_pending = true;
-
-    wxGetApp().begin_bmcu_auto_retry(m_auto_retry_0500_409d_dev_id, 30000);
-    m_status_bar->set_status_text(wxString::Format(
-        _L("(%d/%d) BMCU error. Retrying in %d s..."),
-        m_auto_retry_0500_409d_attempts + 1,
-        BMCU_AUTO_RETRY_MAX_ATTEMPTS,
-        m_auto_retry_0500_409d_wait_left));
-
-    if (!m_auto_retry_0500_409d_timer) {
-        m_auto_retry_0500_409d_timer.reset(new wxTimer(this, wxWindow::NewControlId()));
-        Bind(wxEVT_TIMER, &SelectMachineDialog::on_auto_retry_0500_409d_timer, this, m_auto_retry_0500_409d_timer->GetId());
-    } else if (m_auto_retry_0500_409d_timer->IsRunning()) {
-        m_auto_retry_0500_409d_timer->Stop();
-    }
-
-    BOOST_LOG_TRIVIAL(info)
-        << "schedule BMCU auto retry, dev_id=" << m_auto_retry_0500_409d_dev_id
-        << ", attempt=" << (m_auto_retry_0500_409d_attempts + 1)
-        << "/" << BMCU_AUTO_RETRY_MAX_ATTEMPTS;
-    m_auto_retry_0500_409d_timer->StartOnce(1000);
-}
-
-bool SelectMachineDialog::is_auto_retry_0500_409d_ready()
-{
-    DeviceManager* dev = wxGetApp().getDeviceManager();
-    if (!dev) { return false; }
-
-    MachineObject* obj = dev->get_my_machine(
-        m_auto_retry_0500_409d_dev_id.empty() ? m_printer_last_select : m_auto_retry_0500_409d_dev_id);
-    if (!obj) { return false; }
-
-    try {
-        return obj->is_connected() && !obj->is_connecting();
-    } catch (...) {
-        return false;
-    }
-}
-
-void SelectMachineDialog::stop_auto_retry_0500_409d(bool clear_guard)
-{
-    if (m_auto_retry_0500_409d_timer && m_auto_retry_0500_409d_timer->IsRunning()) {
-        m_auto_retry_0500_409d_timer->Stop();
-    }
-    if (clear_guard) {
-        wxGetApp().finish_bmcu_auto_retry(m_auto_retry_0500_409d_dev_id);
-    }
-    m_auto_retry_0500_409d_pending = false;
-    m_auto_retry_0500_409d_ready_checks = 0;
-    m_auto_retry_0500_409d_wait_left = 0;
-}
-
-void SelectMachineDialog::on_auto_retry_0500_409d_timer(wxTimerEvent& event)
-{
-    if (!m_auto_retry_0500_409d_pending) { return; }
-
-    if (m_auto_retry_0500_409d_wait_left > 0) {
-        --m_auto_retry_0500_409d_wait_left;
-        if (m_auto_retry_0500_409d_wait_left > 0) {
-            m_status_bar->set_status_text(wxString::Format(
-                _L("(%d/%d) BMCU error. Retrying in %d s..."),
-                m_auto_retry_0500_409d_attempts + 1,
-                BMCU_AUTO_RETRY_MAX_ATTEMPTS,
-                m_auto_retry_0500_409d_wait_left));
-            m_auto_retry_0500_409d_timer->StartOnce(1000);
-            return;
-        }
-    }
-
-    m_auto_retry_0500_409d_wait_left = 0;
-    if (!is_auto_retry_0500_409d_ready()) {
-        ++m_auto_retry_0500_409d_ready_checks;
-        if (m_auto_retry_0500_409d_ready_checks >= BMCU_AUTO_RETRY_MAX_READY_CHECKS) {
-            BOOST_LOG_TRIVIAL(warning)
-                << "BMCU auto retry printer-ready timeout, dev_id=" << m_auto_retry_0500_409d_dev_id;
-            m_auto_retry_0500_409d_exhausted = true;
-            stop_auto_retry_0500_409d(true);
-            Enable_Send_Button(true);
-            const wxString message = _L(
-                "The printer did not become ready after the BMCU error. You can send the print again; "
-                "OrcaStudio will retry without blocking the application.");
-            m_status_bar->set_status_text(message);
-            return;
-        }
-
-        m_status_bar->set_status_text(wxString::Format(
-            _L("(%d/%d) Waiting for the printer to become ready..."),
-            m_auto_retry_0500_409d_attempts + 1,
-            BMCU_AUTO_RETRY_MAX_ATTEMPTS));
-        m_auto_retry_0500_409d_timer->StartOnce(1000);
-        return;
-    }
-
-    ++m_auto_retry_0500_409d_attempts;
-    const int attempt = m_auto_retry_0500_409d_attempts;
-    wxGetApp().begin_bmcu_auto_retry(m_auto_retry_0500_409d_dev_id, 30000);
-    BOOST_LOG_TRIVIAL(info)
-        << "BMCU auto retry printer ready, dev_id=" << m_auto_retry_0500_409d_dev_id
-        << ", attempt=" << attempt << "/" << BMCU_AUTO_RETRY_MAX_ATTEMPTS;
-    stop_auto_retry_0500_409d(false);
-    m_status_bar->set_status_text(wxString::Format(
-        _L("(%d/%d) Retrying print..."), attempt, BMCU_AUTO_RETRY_MAX_ATTEMPTS));
-    m_is_canceled = false;
-    m_is_auto_retry_0500_409d_invoke = true;
-    prepare_mode(false);
-    on_send_print();
 }
 
 void SelectMachineDialog::update_timelapse_folder_btn_icon()
@@ -3553,7 +3514,7 @@ void SelectMachineDialog::show_timelapse_storage_dialog(MachineObject* obj)
 
     if (show_cleanup_btn) {
         auto* btn_cleanup = new Button(&dlg, _L("Clean Up"));
-        btn_cleanup->Bind(wxEVT_BUTTON, [&dlg, ID_CLEANUP](wxCommandEvent&) { dlg.EndModal(ID_CLEANUP); });
+        btn_cleanup->Bind(wxEVT_BUTTON, [&dlg](wxCommandEvent&) { dlg.EndModal(ID_CLEANUP); });
         btn_sizer->Add(btn_cleanup, 0, wxEXPAND);
     }
 
@@ -3595,7 +3556,7 @@ void SelectMachineDialog::navigate_to_timelapse_page()
         main_frame->jump_to_monitor();
 
         // then switch to Storage (Media) tab inside Monitor
-        auto* monitor = dynamic_cast<MonitorPanel*>(main_frame->m_monitor);
+        MonitorPanel* monitor = MonitorPanel::if_built();
         if (monitor) {
             auto* tabpanel = monitor->get_tabpanel();
             if (tabpanel) {
@@ -3616,87 +3577,22 @@ void SelectMachineDialog::on_send_print()
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
 
-    if (m_print_type == PrintFromType::FROM_NORMAL && m_is_in_sending_mode) {
-        if (m_is_auto_retry_0500_409d_invoke) {
-            stop_auto_retry_0500_409d(true);
-            m_is_auto_retry_0500_409d_invoke = false;
-        }
+    if (m_print_type == PrintFromType::FROM_NORMAL && m_is_in_sending_mode)
         return;
-    }
-
-    const auto restore_after_preflight_failure = [this]() {
-        if (m_is_auto_retry_0500_409d_invoke) {
-            stop_auto_retry_0500_409d(true);
-            m_is_auto_retry_0500_409d_invoke = false;
-        }
-        Enable_Send_Button(true);
-    };
 
     int result = 0;
     if (m_printer_last_select.empty()) {
-        restore_after_preflight_failure();
         return;
     }
 
     DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
-    if (!dev) {
-        restore_after_preflight_failure();
-        return;
-    }
+    if (!dev) return;
 
     MachineObject* obj_ = dev->get_selected_machine();
-    if (obj_ == nullptr) {
-        restore_after_preflight_failure();
-        return;
-    }
     assert(obj_->get_dev_id() == m_printer_last_select);
+    if (obj_ == nullptr) { return; }
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ", print_job: for send task, current printer id =  " << m_printer_last_select << std::endl;
-    if (!m_is_auto_retry_0500_409d_invoke) {
-        stop_auto_retry_0500_409d(true);
-        m_auto_retry_0500_409d_attempts = 0;
-        m_auto_retry_0500_409d_exhausted = false;
-    }
-    m_is_auto_retry_0500_409d_invoke = false;
-    const std::string retry_dev_id = m_printer_last_select;
-    auto retry_callback_queued = std::make_shared<std::atomic<bool>>(false);
-    dev->set_auto_retry_print_ui_callback([
-        token = std::weak_ptr<int>(m_token), this, retry_dev_id, retry_callback_queued](const std::string& dev_id) {
-        if (token.expired()) {
-            return false;
-        }
-        if (!dev_id.empty() && dev_id != retry_dev_id) {
-            return false;
-        }
-
-        bool expected = false;
-        if (!retry_callback_queued->compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-            return true;
-        }
-
-        wxGetApp().CallAfter([token, this, dev_id, retry_callback_queued]() {
-            retry_callback_queued->store(false, std::memory_order_release);
-            if (token.expired()) {
-                return;
-            }
-            if (m_auto_retry_0500_409d_pending || m_auto_retry_0500_409d_exhausted) {
-                return;
-            }
-            if (m_auto_retry_0500_409d_attempts >= BMCU_AUTO_RETRY_MAX_ATTEMPTS) {
-                m_auto_retry_0500_409d_exhausted = true;
-                stop_auto_retry_0500_409d(true);
-                Enable_Send_Button(true);
-                const wxString message = wxString::Format(
-                    _L("The printer rejected the print after %d automatic BMCU retries. "
-                       "You can send it again without restarting OrcaStudio."),
-                    BMCU_AUTO_RETRY_MAX_ATTEMPTS);
-                m_status_bar->set_status_text(message);
-                return;
-            }
-            schedule_auto_retry_0500_409d(dev_id);
-        });
-        return true;
-    });
     show_status(PrintDialogStatus::PrintStatusSending);
 
     m_status_bar->reset();
@@ -3820,14 +3716,14 @@ void SelectMachineDialog::on_send_print()
         BOOST_LOG_TRIVIAL(error) << "build_nozzle_info errors";
     }
 
-    m_print_job->sdcard_state = obj_->GetStorage()->get_sdcard_state();    
+    m_print_job->sdcard_state = obj_->GetStorage()->get_sdcard_state();
     m_print_job->has_sdcard =  wxGetApp().app_config->get("allow_abnormal_storage") == "true"
             ? (m_print_job->sdcard_state == DevStorage::SdcardState::HAS_SDCARD_NORMAL
                || m_print_job->sdcard_state == DevStorage::SdcardState::HAS_SDCARD_ABNORMAL)
             : m_print_job->sdcard_state == DevStorage::SdcardState::HAS_SDCARD_NORMAL;
 
-    m_print_job->could_emmc_print = m_print_type == PrintFromType::FROM_SDCARD_VIEW ? obj_->is_support_print_with_emmc : obj_->can_use_emmc_print();
-    if (m_print_type == PrintFromType::FROM_NORMAL && obj_->is_support_print_with_emmc && !m_print_job->could_emmc_print) {
+    m_print_job->could_emmc_print = obj_->can_use_emmc_print();
+    if (obj_->is_support_print_with_emmc && !m_print_job->could_emmc_print) {
         BOOST_LOG_TRIVIAL(info) << "print_job: emmc print disabled by config";
     }
 
@@ -3837,14 +3733,17 @@ void SelectMachineDialog::on_send_print()
         timelapse_option = m_checkbox_list["timelapse"]->getValue() == "on";
     }
 
+    // PA-profile-sharing mode (extrude_cali_manual_mode): 0 = share (toggle on), 1 = per-nozzle.
+    // Shared PA (0) is the deliberate default for pa_mode printers even while the toggle is hidden;
+    // -1 keeps the field omitted for every other printer, which was the prior behavior.
     int pa_manual_mode = -1;
     if (obj_->is_support_pa_mode) {
         pa_manual_mode = (m_checkbox_list["pa_value"]->getValue() == "on") ? 0 : 1;
     }
 
-    m_print_job->task_timelapse_use_internal =
-        timelapse_option && obj_->is_support_internal_timelapse &&
-        (m_timelapse_storage.empty() || m_timelapse_storage == "internal");
+    if (timelapse_option && obj_->is_support_internal_timelapse && !m_timelapse_storage.empty()) {
+        m_print_job->task_timelapse_use_internal = (m_timelapse_storage == "internal");
+    }
 
     m_print_job->set_print_config(
         MachineBedTypeString[0],
@@ -3883,10 +3782,32 @@ void SelectMachineDialog::on_send_print()
     m_print_job->on_success([this]() { finish_mode(); });
 
     m_print_job->on_check_ip_address_fail([this]() {
-        wxCommandEvent* evt = new wxCommandEvent(EVT_CLEAR_IPADDRESS);
-        wxQueueEvent(this, evt);
-        wxGetApp().show_ip_address_enter_dialog();
-     });
+        // Invoked from the PrintJob worker thread when the LAN pre-flight (file upload
+        // verification) fails. Marshal device/UI access to the main thread.
+        CallAfter([this]()
+        {
+            // Reset the dialog out of sending mode so the user can retry.
+            wxCommandEvent* evt = new wxCommandEvent(EVT_CLEAR_IPADDRESS);
+            wxQueueEvent(this, evt);
+
+            DeviceManager* dev = wxGetApp().getDeviceManager();
+            MachineObject* obj = dev ? dev->get_selected_machine() : nullptr;
+
+            if (obj && obj->is_connected())
+            {
+                // Connected: failed on file upload
+                MessageDialog dlg(this,
+                                  _L("Failed to upload the file to the printer's storage. Please try again."),
+                                  _L("Send Failed"), wxOK | wxICON_ERROR);
+                dlg.ShowModal();
+            }
+            else
+            {
+                // Not connected: reenter ip and access code
+                wxGetApp().show_ip_address_enter_dialog();
+            }
+        });
+    });
 
     // update ota version
     NetworkAgent* agent = wxGetApp().getAgent();
@@ -3944,7 +3865,7 @@ void SelectMachineDialog::on_refresh(wxCommandEvent &event)
 void SelectMachineDialog::on_set_finish_mapping(wxCommandEvent &evt)
 {
     auto selection_data = evt.GetString();
-    auto selection_data_arr = wxSplit(selection_data.ToStdString(), '|');
+    auto selection_data_arr = wxSplit(selection_data, '|');
 
     BOOST_LOG_TRIVIAL(info) << "The ams mapping selection result: data is " << selection_data;
 
@@ -4012,9 +3933,6 @@ void SelectMachineDialog::on_print_job_cancel(wxCommandEvent &evt)
 {
     BOOST_LOG_TRIVIAL(info) << "print_job: canceled";
 
-    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
-        dev->set_auto_retry_print_ui_callback(nullptr);
-    }
     EnableEditing(true);
     show_status(PrintDialogStatus::PrintStatusInit);
     // enter prepare mode
@@ -4035,8 +3953,12 @@ int SelectMachineDialog::update_print_required_data(Slic3r::DynamicPrintConfig c
     m_required_data_config = config;
     m_required_data_model = model;
     //m_required_data_plate_data_list = plate_data_list;
+    auto* agent = wxGetApp().getAgent();
     for (auto i = 0; i < plate_data_list.size(); i++) {
         if (!plate_data_list[i]->gcode_file.empty()) {
+            if (agent)
+                for (auto& info : plate_data_list[i]->slice_filaments_info)
+                    info.filament_id = agent->to_orca_filament_id(info.filament_id);
             m_required_data_plate_data_list.push_back(plate_data_list[i]);
         }
     }
@@ -4059,12 +3981,11 @@ _compare_obj_names(MachineObject* obj1, MachineObject* obj2)
 }
 
 /*******************************************************************
-*@note   _collect_machine_list
-*@param  dev_manager -- the device manager
-*@param  sorted_machine_objs -- return the sorted machine objects
-*@param  best_one -- return the best one
-*/
-/*******************************************************************/
+* @note   _collect_machine_list
+* @param  dev_manager -- the device manager
+* @param  sorted_machine_objs -- return the sorted machine objects
+* @param  best_one -- return the best one
+*******************************************************************/
 static void
 _collect_sorted_machines(Slic3r::DeviceManager* dev_manager,
                          std::vector<MachineObject*>& sorted_machine_objs)
@@ -4104,7 +4025,7 @@ _collect_sorted_machines(Slic3r::DeviceManager* dev_manager,
     };
 
     // collect from user machine list
-    const auto& user_machine_list = dev_manager->get_my_machine_list();// user machine list
+    const auto& user_machine_list = dev_manager->get_my_machine_list(dev_manager->get_current_printer_agent_id());// user machine list
     for (const auto& elem : user_machine_list)
     {
         MachineObject* mobj = elem.second;
@@ -4266,11 +4187,6 @@ void SelectMachineDialog::update_printer_combobox(wxCommandEvent &event)
 
 void SelectMachineDialog::on_timer(wxTimerEvent &event)
 {
-    if (m_auto_retry_0500_409d_timer && event.GetId() == m_auto_retry_0500_409d_timer->GetId()) {
-        event.Skip();
-        return;
-    }
-
     DeviceManager* dev_ = Slic3r::GUI::wxGetApp().getDeviceManager();
     if(!dev_) return;
     MachineObject* obj_ = dev_->get_my_machine(m_printer_last_select);
@@ -4442,7 +4358,9 @@ void SelectMachineDialog::update_filament_change_count()
         m_mapping_sugs_sizer->Show(true);
         m_change_filament_times_sizer->Show(true);
         m_txt_change_filament_times->Show(true);
-        m_txt_change_filament_times->SetLabel(wxString::Format(_L("Cost %dg filament and %d changes more than optimal grouping."), saving_weight, hand_changes_count));
+        m_txt_change_filament_times->SetLabel(wxString::Format(_L_PLURAL("Cost %dg filament and %d change more than optimal grouping.",
+                                                                         "Cost %dg filament and %d changes more than optimal grouping.", hand_changes_count),
+                                                               saving_weight, hand_changes_count));
         m_txt_change_filament_times->Wrap(FromDIP(580));
         m_txt_change_filament_times->Layout();
     }
@@ -4462,9 +4380,9 @@ static wxString _check_kval_not_default(const MachineObject* obj, const std::vec
 
         wxString ams_name;
         if (info.tray_id == VIRTUAL_TRAY_MAIN_ID) {
-            ams_name = "Right-Ext";
+            ams_name = _L("Right-Ext");
         } else if (info.tray_id == VIRTUAL_TRAY_DEPUTY_ID) {
-            ams_name = "Left-Ext";
+            ams_name = _L("Left-Ext");
         } else {
             ams_name = wxGetApp().transition_tridid(info.tray_id);
         }
@@ -4725,11 +4643,13 @@ bool SelectMachineDialog::CheckErrorExtruderNozzleWithSlicing(MachineObject* obj
 
             // check nozzle data valid
             {
-                if (installed_ext_nozzle.GetNozzleType() == NozzleType::ntUndefine ||
-                    installed_ext_nozzle.GetNozzleDiameter() <= 0.0f) {
-                    show_status(PrintDialogStatus::PrintStatusNozzleDataInvalid);
-                    return false;
-                }
+                // Commented out the following as ntUndefine and 0.0f are default values
+                // (signifying that the value is not given) that should PASS, not fail
+                // if (installed_ext_nozzle.GetNozzleType() == NozzleType::ntUndefine ||
+                //     installed_ext_nozzle.GetNozzleDiameter() <= 0.0f) {
+                //     show_status(PrintDialogStatus::PrintStatusNozzleDataInvalid);
+                //     return false;
+                // }
 
                 if (obj_->is_nozzle_flow_type_supported() &&
                     installed_ext_nozzle.GetNozzleFlowType() == NozzleFlowType::NONE_FLOWTYPE) {
@@ -4758,7 +4678,10 @@ bool SelectMachineDialog::CheckErrorExtruderNozzleWithSlicing(MachineObject* obj
 
             // check nozzle diameter
             {
-                if (slicing_ext.nozzle_diameter != installed_ext_nozzle.GetNozzleDiameter()) {
+                // 0.0f is default when there is no nozzle diameter is given.
+                // In nozzle_diameter == 0.0f case, it passes and does not require a comparison
+                if (installed_ext_nozzle.GetNozzleDiameter() > 0.0f &&
+                    slicing_ext.nozzle_diameter != installed_ext_nozzle.GetNozzleDiameter()) {
                     std::vector<wxString> msg_params;
                     if (ext_sys->GetTotalExtderCount() == 2) {
                         const wxString& mismatch_nozzle_str = _get_nozzle_name(ext_sys->GetTotalExtderCount(), slicing_ext_idx);
@@ -4950,6 +4873,22 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     if (!obj_->is_fdm_type()) {
         show_status(PrintDialogStatus::PrintStatusModeNotFDM);
         return;
+    }
+
+    bool has_optional_printer_model = DevPrinterConfigUtil::is_optional_printer_model_id(obj_->printer_type);
+    if (m_print_type == PrintFromType::FROM_NORMAL) {
+        PresetBundle* preset_bundle = wxGetApp().preset_bundle;
+        has_optional_printer_model = has_optional_printer_model ||
+            (preset_bundle && DevPrinterConfigUtil::is_optional_printer_model_id(
+                preset_bundle->printers.get_edited_preset().get_printer_type(preset_bundle)));
+    } else if (m_print_type == PrintFromType::FROM_SDCARD_VIEW && !m_required_data_plate_data_list.empty()) {
+        has_optional_printer_model = has_optional_printer_model ||
+            DevPrinterConfigUtil::is_optional_printer_model_id(
+                m_required_data_plate_data_list[m_print_plate_idx]->printer_model_id);
+    }
+
+    if (has_optional_printer_model) {
+        show_status(PrintDialogStatus::PrintStatusOptionalPrinterModel);
     }
 
     if (is_blocking_printing(obj_)) {
@@ -5247,8 +5186,11 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         const auto& warning_tpu_filaments =
             DevPrinterConfigUtil::get_value_from_config<std::vector<std::string>>(obj_->printer_type, "auto_on_cali_warning_tpu_filaments");
         if (!warning_tpu_filaments.empty()) {
+            auto* agent = wxGetApp().getAgent();
             for (const auto& fila : m_ams_mapping_result) {
-                if (std::find(warning_tpu_filaments.begin(), warning_tpu_filaments.end(), fila.filament_id) != warning_tpu_filaments.end()) {
+                // fila.filament_id is our OF id; the printer config list holds the printer's own.
+                const std::string printer_filament_id = agent ? agent->from_orca_filament_id(fila.filament_id) : fila.filament_id;
+                if (std::find(warning_tpu_filaments.begin(), warning_tpu_filaments.end(), printer_filament_id) != warning_tpu_filaments.end()) {
                     show_status(PrintDialogStatus::PrintStatusTPUUnsuggestCali,
                                 { _L("If 'Dynamic Flow Calibration' is set to Auto/On, the system will use the manual calibration value or the default value and skip the flow calibration process. You can perform a manual flow calibration for TPU filament on the 'Calibration' page.") });
                     break;
@@ -5299,7 +5241,7 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
 
     /*Check high temperture slicing*/
     if (m_print_type == PrintFromType::FROM_NORMAL) {
-        std::set<string>  high_temp_filaments;
+        std::set<std::string> high_temp_filaments;
         std::unordered_set<int> known_fila_soften_extruders;
         std::unordered_set<int> unknown_fila_soften_extruders;
         auto preset_full_config = wxGetApp().preset_bundle->full_config();
@@ -5404,9 +5346,12 @@ bool SelectMachineDialog::can_support_pa_auto_cali()
 
     std::vector<std::string> unsupport_auto_cali_filaments = DevPrinterConfigUtil::get_unsupport_auto_cali_filaments(obj->printer_type);
     if (!unsupport_auto_cali_filaments.empty()) {
+        auto* agent = wxGetApp().getAgent();
         auto iter = std::find_if(m_filaments.begin(), m_filaments.end(),
-            [&unsupport_auto_cali_filaments](const FilamentInfo &item) {
-            auto iter = std::find(unsupport_auto_cali_filaments.begin(), unsupport_auto_cali_filaments.end(), item.filament_id);
+            [&unsupport_auto_cali_filaments, agent](const FilamentInfo &item) {
+            // item.filament_id is our OF id; the printer config list holds the printer's own.
+            const std::string printer_filament_id = agent ? agent->from_orca_filament_id(item.filament_id) : item.filament_id;
+            auto iter = std::find(unsupport_auto_cali_filaments.begin(), unsupport_auto_cali_filaments.end(), printer_filament_id);
             return iter != unsupport_auto_cali_filaments.end();
         });
 
@@ -5568,7 +5513,7 @@ void SelectMachineDialog::change_materialitem_tip(bool no_ams_only_ext)
         int       id   = iter->first;
         Material *item = iter->second;
         if (item) {
-            if (no_ams_only_ext && item->item->m_ams_name == "Ext") {
+            if (no_ams_only_ext && item->item->m_ams_name == _L("Ext")) {
                 item->item->SetToolTip(wxEmptyString);
             }
             else {
@@ -5668,8 +5613,8 @@ void SelectMachineDialog::reset_and_sync_ams_list()
                 item = new MaterialItem(m_filament_left_panel, colour_rgb, _L(display_materials[extruder]));
                 m_sizer_ams_mapping_left->Add(item, 0, wxALL, FromDIP(5));
             }
-            else if (m_filaments_map[extruder] == 2)
-            {
+            else // map == 2, or (non-BBL multi-nozzle) 3+; update_material_item_pos() collapses
+            {    // these into the single panel when the device reports < 2 extruders.
                 item = new MaterialItem(m_filament_right_panel, colour_rgb, _L(display_materials[extruder]));
                 m_sizer_ams_mapping_right->Add(item, 0, wxALL, FromDIP(5));
             }
@@ -5693,7 +5638,7 @@ void SelectMachineDialog::reset_and_sync_ams_list()
             first_enabled_id = extruder;
         }
 
-        item->Bind(wxEVT_LEFT_UP, [this, item, materials, extruder](wxMouseEvent &e) {});
+        item->Bind(wxEVT_LEFT_UP, [materials](wxMouseEvent &e) {});
         item->Bind(wxEVT_LEFT_DOWN, [this, item, materials, extruder](wxMouseEvent &e) {
             if (!item->m_enable) {return;}
             if (!m_check_flag || m_print_status == PrintDialogStatus::PrintStatusUnsupportedPrinter) { return; } /*STUDIO-11301*/
@@ -5890,10 +5835,15 @@ void SelectMachineDialog::clone_thumbnail_data() {
         m_preview_colors_in_thumbnail.resize(m_materialList.size());
     }
     while (iter != m_materialList.end()) {
-        int           id   = iter->first;
         Material *    item = iter->second;
         MaterialItem *m    = item->item;
-        m_preview_colors_in_thumbnail[id] = m->m_material_coloul;
+        // Orca: key the preview colours by filament slot, as m_cur_colors_in_thumbnail and
+        // SyncAmsInfoDialog already do, so recompute_mixed_slot_colors() below can look a mixed
+        // slot's component colours up by id (BBS keys this array by list position).
+        if (item->id >= m_preview_colors_in_thumbnail.size()) {
+            m_preview_colors_in_thumbnail.resize(item->id + 1);
+        }
+        m_preview_colors_in_thumbnail[item->id] = m->m_material_coloul;
         if (item->id < m_cur_colors_in_thumbnail.size()) {
             m_cur_colors_in_thumbnail[item->id] = m->m_ams_coloul;
         }
@@ -5903,6 +5853,20 @@ void SelectMachineDialog::clone_thumbnail_data() {
         }
         iter++;
     }
+
+    // Expand color arrays to cover mixed (virtual) slots and compute their blended colors
+    const auto& cfg = wxGetApp().preset_bundle->project_config;
+    size_t total = 0;
+    if (auto* opt = cfg.option<ConfigOptionBools>("filament_is_mixed"))
+        total = opt->values.size();
+    size_t target = std::max(total, m_cur_colors_in_thumbnail.size());
+    if (m_cur_colors_in_thumbnail.size() < target)
+        m_cur_colors_in_thumbnail.resize(target);
+    if (m_preview_colors_in_thumbnail.size() < target)
+        m_preview_colors_in_thumbnail.resize(target);
+    recompute_mixed_slot_colors(m_preview_colors_in_thumbnail, cfg);
+    recompute_mixed_slot_colors(m_cur_colors_in_thumbnail, cfg);
+
     //copy data
     auto &data   = m_cur_input_thumbnail_data;
     m_preview_thumbnail_data.reset();
@@ -6077,6 +6041,10 @@ void SelectMachineDialog::change_default_normal(int old_filament_id, wxColour te
             return;
         }
     }
+    // Recompute mixed slot colors after physical slot color change
+    const auto& cfg = wxGetApp().preset_bundle->project_config;
+    recompute_mixed_slot_colors(m_cur_colors_in_thumbnail, cfg);
+
     ThumbnailData& data = m_cur_input_thumbnail_data;
     ThumbnailData& no_light_data = m_cur_no_light_thumbnail_data;
     if (data.width > 0 && data.height > 0 && data.width == no_light_data.width && data.height == no_light_data.height) {
@@ -6301,8 +6269,8 @@ void SelectMachineDialog::set_default_from_sdcard()
             first_enabled_id = fo.id;
         }
 
-        item->Bind(wxEVT_LEFT_UP, [this, item, materials](wxMouseEvent& e) {});
-        item->Bind(wxEVT_LEFT_DOWN, [this, obj_, item, materials, diameters_count, fo](wxMouseEvent& e) {
+        item->Bind(wxEVT_LEFT_UP, [materials](wxMouseEvent& e) {});
+        item->Bind(wxEVT_LEFT_DOWN, [this, obj_, item, materials, fo](wxMouseEvent& e) {
             if (!item->m_enable) {return;}
             if (!m_check_flag || m_print_status == PrintDialogStatus::PrintStatusUnsupportedPrinter) { return; } /*STUDIO-11301*/
 
@@ -6473,11 +6441,6 @@ void SelectMachineDialog::show_init() {
 
 SelectMachineDialog::~SelectMachineDialog()
 {
-    m_token.reset();
-    stop_auto_retry_0500_409d(true);
-    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
-        dev->set_auto_retry_print_ui_callback(nullptr);
-    }
     delete m_refresh_timer;
     if (m_timelapse_check_timer)
         m_timelapse_check_timer->Stop();
@@ -7101,7 +7064,7 @@ void PrinterInfoBox::SetPrinters(const std::vector<MachineObject*>& sorted_print
     {
         wxString shown_dev_name = wxString::FromUTF8(obj->get_dev_name());
         if (obj->is_lan_mode_printer()) {
-            shown_dev_name += "(LAN)";
+            shown_dev_name += _L("(LAN)");
         }
 
         DropDown::Item drop_item;
@@ -7253,7 +7216,7 @@ void PrinterInfoBox::Create()
 
 void PrinterInfoBox::OnBtnQuestionClicked(wxCommandEvent& event)
 {
-    wxGetApp().open_browser_with_warning_dialog(wxT("https://www.orcaslicer.com/wiki/"));
+    wxLaunchDefaultBrowser(wxT("https://www.orcaslicer.com/wiki/")); // Orca: neutral wiki link (vendor URL removed)
 }
 
 

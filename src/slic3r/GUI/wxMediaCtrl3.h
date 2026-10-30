@@ -8,64 +8,62 @@
 #ifndef wxMediaCtrl3_h
 #define wxMediaCtrl3_h
 
+#include <chrono>
+#include <wx/event.h>
+#include <wx/gdicmn.h>
+#include <wx/string.h>
+#include <memory>
+#include <mutex>
+#include <cstdint>
+#include "wx/window.h"
+#include "wx/bitmap.h"
 #include "wx/uri.h"
 #include "wx/mediactrl.h"
-#include "wx/timer.h"
-#include <wx/bitmap.h>
-#include "../Utils/FrameBuffer.hpp"
-#include <atomic>
-#include <string>
+#include "IMediaController.hpp"
 
 wxDECLARE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
-wxDECLARE_EVENT(EVT_MEDIA_CTRL_FIRST_FRAME, wxCommandEvent);
 
 void wxMediaCtrl_OnSize(wxWindow * ctrl, wxSize const & videoSize, int width, int height);
 
 #define BAMBU_DYNAMIC
+#include <atomic>
 #include <condition_variable>
 #include <thread>
-#ifndef _WIN32
 #include <wx/image.h>
-#endif
 #include "Printer/BambuTunnel.h"
-
-#ifdef _WIN32
-typedef wxBitmap PlayFrame;
-#else
-typedef wxImage PlayFrame;
-#endif
 
 class AVVideoDecoder;
 
-class wxMediaCtrl3 : public wxWindow, BambuLib
+class wxMediaCtrl3 : public wxWindow, public Slic3r::GUI::IMediaController, BambuLib
 {
 public:
     wxMediaCtrl3(wxWindow *parent);
 
-    ~wxMediaCtrl3();
+    ~wxMediaCtrl3() override;
 
-    void Load(wxURI url, std::chrono::system_clock::time_point play_start_time = {});
-#if defined(__WXMAC__) || defined(__APPLE__)
-    void LoadRaw(wxString const &url, std::chrono::system_clock::time_point play_start_time = {});
+    void Load(wxURI url) override;
+
+    void Play() override;
+
+    void Stop() override;
+
+    // Render frames supplied by a controller which owns its own transport.
+    // The frame is copied while m_mutex is held; callers may release it after
+    // this method returns.
+    void SetExternalFrame(const wxImage& frame, wxSize videoSize);
+#ifdef _WIN32
+    void SetExternalFrame(const wxBitmap& frame, wxSize videoSize);
 #endif
+    void BeginExternalStream();
+    void EndExternalStream();
 
-    std::chrono::system_clock::time_point m_play_start_time;
+    void SetIdleImage(wxString const & image);
 
-    void Play();
+    wxMediaState GetState() override;
 
-    void Stop();
+    int GetLastError() const override;
 
-    void SetIdleImage(wxString const & image, wxString const & watermark_text = {});
-    void SetIdleImage(const wxImage &image, wxString const & watermark_text = {});
-
-    wxMediaState GetState();
-
-    int GetLastError();
-
-    wxSize GetVideoSize();
-
-    void SetConstrainByAspectRatio(bool constrain) { m_constrain_by_aspect_ratio = constrain; }
-    bool GetConstrainByAspectRatio() const { return m_constrain_by_aspect_ratio; }
+    wxSize GetVideoSize() const override;
 
 protected:
     DECLARE_EVENT_TABLE()
@@ -77,45 +75,35 @@ protected:
     void DoSetSize(int x, int y, int width, int height, int sizeFlags) override;
 
     static void bambu_log(void *ctx, int level, tchar const *msg);
+    static int ffmpeg_interrupt_callback(void *opaque);
 
     void PlayThread();
+    int PlayFfmpeg(std::shared_ptr<wxURI> const &url, std::unique_lock<std::mutex> &lock);
 
     void NotifyStopped();
 
-    void GetFrameThread(int frame_rate);
-
-    void OnRenderTimer(wxTimerEvent &evt);
-
 private:
     wxString m_idle_image;
-    wxString m_watermark_text;
     wxMediaState m_state  = wxMEDIASTATE_STOPPED;
     int m_error  = 0;
     wxSize m_video_size = wxDefaultSize;
     wxSize m_frame_size = wxDefaultSize;
-    PlayFrame m_frame;
-#if defined(__WXMAC__) || defined(__APPLE__)
-    struct MediaUrl {
-        std::string value;
-        bool has_scheme = false;
-    };
-    std::shared_ptr<MediaUrl> m_url;
+#ifdef _WIN32
+    wxBitmap m_frame;
 #else
-    std::shared_ptr<wxURI> m_url;
+    wxImage m_frame;
 #endif
-    std::mutex m_mutex;
-    std::mutex m_ui_mutex;
+
+    std::shared_ptr<wxURI> m_url;
+    std::shared_ptr<wxURI> m_active_url;
+    bool m_external = false;
+    std::uint64_t m_last_PTS{0};
+    std::chrono::system_clock::time_point m_last_PTS_expected;
+    std::chrono::system_clock::time_point m_last_PTS_practical;
+    mutable std::mutex m_mutex;
     std::condition_variable m_cond;
     std::thread m_thread;
-
-    bool m_constrain_by_aspect_ratio{true};
-    const int m_buffer_time = 300;
-    Slic3r::Utils::FixedOverwriteBuffer<PlayFrame> m_frame_buffer;
-    std::thread m_get_frame_thread;
-    std::atomic<bool> m_get_frame_exit{false};
-
-    wxTimer m_render_timer;
-    std::atomic<bool> m_need_refresh{false};
+    std::atomic_bool m_refresh_pending{false};
 };
 
 #endif /* wxMediaCtrl3_h */

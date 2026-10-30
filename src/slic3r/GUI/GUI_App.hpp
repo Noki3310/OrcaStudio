@@ -1,37 +1,50 @@
 #ifndef slic3r_GUI_App_hpp_
 #define slic3r_GUI_App_hpp_
 
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
+#include <atomic>
+#include <boost/optional/optional.hpp>
+#include <chrono>
+#include <cstdint>
+#include <cstddef>
+#include <functional>
+#include <map>
+#include "libslic3r/Config.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Technologies.hpp"
+#include "libslic3r/Semver.hpp"
 #include <memory>
+#include <set>
+#include "slic3r/GUI/GLShader.hpp"
 #include <string>
 #include "ActionRegistry.hpp"
 #include "ImGuiWrapper.hpp"
 #include "ConfigWizard.hpp"
 #include "OpenGLManager.hpp"
-#include "PresetBundleDialog.hpp"
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/PresetBundle.hpp"
-#include "slic3r/GUI/DeviceManager.hpp"
+#include "libslic3r_version.h"
 #include "slic3r/GUI/UserNotification.hpp"
-#include "slic3r/Utils/NetworkAgent.hpp"
-#include "slic3r/Utils/BBLCloudServiceAgent.hpp"
-#include "slic3r/GUI/WebViewDialog.hpp"
-#include "slic3r/GUI/WebUserLoginDialog.hpp"
-#include "slic3r/GUI/BindDialog.hpp"
-#include "slic3r/GUI/HMS.hpp"
+#include "slic3r/Utils/CloudProvider.hpp"
 #include "slic3r/GUI/Jobs/UpgradeNetworkJob.hpp"
 #include "slic3r/GUI/HttpServer.hpp"
 #include "../Utils/PrintHost.hpp"
+#include "libslic3r/Point.hpp"
 
+#include <vector>
+#include <utility>
 #include <wx/app.h>
 #include <wx/colour.h>
+#include <wx/event.h>
 #include <wx/font.h>
+#include <wx/strconv.h>
+#include <wx/setup.h>
+#include <wx/intl.h>
+#include <wx/gdicmn.h>
 #include <wx/string.h>
 #include <wx/snglinst.h>
 #include <wx/msgdlg.h>
-
-#include <chrono>
-#include <mutex>
-#include <stack>
 
 //#define BBL_HAS_FIRST_PAGE          1
 #define STUDIO_INACTIVE_TIMEOUT     15*60*1000
@@ -65,13 +78,21 @@ class ModelObject;
 class Model;
 class UserManager;
 class DeviceManager;
+class MachineObject;
 class NetworkAgent;
+class IPrinterAgent;
 class TaskManager;
+
+// Same typedef as in bambu_networking.hpp, so this header need not include it.
+typedef std::function<bool()> WasCancelledFn;
 
 namespace GUI{
 
 class RemovableDriveManager;
 class OtherInstanceMessageHandler;
+class ShortcutRegistry;
+enum class ShortcutContext : uint8_t;
+enum class PreferencesTab;
 class MainFrame;
 class Sidebar;
 class ObjectSettings;
@@ -86,6 +107,8 @@ class ParamsDialog;
 class HMSQuery;
 class ModelMallDialog;
 class PingCodeBindDialog;
+class PresetBundleDialog;
+class ZUserLogin;
 class NetworkErrorDialog;
 class PluginsDialog;
 class SpeedDialWebDialog;
@@ -245,6 +268,7 @@ private:
     bool            m_app_conf_exists{ false };
     EAppMode        m_app_mode{ EAppMode::Editor };
     bool            m_is_recreating_gui{ false };
+    std::chrono::steady_clock::time_point m_last_input{ std::chrono::steady_clock::now() };
 #ifdef __linux__
     bool            m_opengl_initialized{ false };
 #endif
@@ -286,6 +310,7 @@ private:
     std::unique_ptr<RemovableDriveManager> m_removable_drive_manager;
 
     std::unique_ptr<ImGuiWrapper> m_imgui;
+    std::unique_ptr<ShortcutRegistry> m_shortcuts;
     std::unique_ptr<PrintHostJobQueue> m_printhost_job_queue;
 	std::unique_ptr <OtherInstanceMessageHandler> m_other_instance_message_handler;
     std::unique_ptr <wxSingleInstanceChecker> m_single_instance_checker;
@@ -330,16 +355,23 @@ private:
     std::atomic<bool>    m_restart_sync_pending {false};
     std::atomic<bool>    m_sync_user_preset_dlg_active {false}; // a manual "Sync Presets" progress dialog is on screen (see restart_sync_user_preset)
     std::atomic<bool>    m_sync_user_presets_now {false}; // request the sync loop to push user presets on its next tick
+    bool                 m_user_preset_pull_pending {false}; // set when a sync thread starts, cleared once its pull is applied; a failed pull or a stopped sync leaves it set
+    bool                 m_legacy_filament_check_due {false}; // the startup check waits for that pull
+    bool                 m_legacy_filament_check_running {false}; // a check is in progress, its dialog may be open
     std::atomic<bool>    m_migration_retry_pending {false};
     bool             m_is_dark_mode{ false };
     bool             m_adding_script_handler { false };
     bool             m_side_popup_status{false};
     bool             m_show_http_error_msgdlg{false};
     std::chrono::steady_clock::time_point m_last_401_error_time;
+    // OrcaCloud webview session handoff: the newest request_web_session state from the cloud pane
+    // and a generation counter so a superseded mint/login result is dropped (guide §5, "only the
+    // newest request counts").
+    std::string      m_cloud_handoff_state;
+    // The OrcaCloud path the open requests target, remembered so a login re-seed keeps the same page.
+    std::string      m_cloud_open_path;
+    uint64_t         m_cloud_handoff_gen { 0 };
     bool             m_show_error_msgdlg{false};
-    std::mutex       m_bmcu_auto_retry_mutex;
-    std::string      m_bmcu_auto_retry_dev_id;
-    std::chrono::steady_clock::time_point m_bmcu_auto_retry_until{};
     wxString         m_info_dialog_content;
     HttpServer       m_http_server;
     bool             m_show_gcode_window{true};
@@ -351,8 +383,14 @@ public:
     std::string     get_local_models_path();
     bool            OnInit() override;
     int             OnExit() override;
+    void            CleanUp() override;
     bool            initialized() const { return m_initialized; }
     inline bool     is_enable_multi_machine() { return this->app_config&& this->app_config->get("enable_multi_machine") == "true"; }
+#ifdef SLIC3R_CAD
+    inline bool     is_enable_cad_feature() { return this->app_config && this->app_config->get_bool("enable_cad_feature"); }
+    inline bool     is_auto_close_sketch_loops() { return !this->app_config
+        || this->app_config->get_bool("auto_close_sketch_loops"); }
+#endif
 
     std::map<std::string, bool> test_url_state;
 
@@ -365,17 +403,30 @@ public:
     EAppMode get_app_mode() const { return m_app_mode; }
     Slic3r::DeviceManager* getDeviceManager() { return m_device_manager; }
     bool                   is_blocking_printing(MachineObject *obj_ = nullptr);
+    bool                   is_blocking_printing(MachineObject *obj_, const std::string& source_model);
     Slic3r::TaskManager*   getTaskManager() { return m_task_manager; }
     HMSQuery* get_hms_query() { return hms_query; }
     NetworkAgent* getAgent() { return m_agent; }
+    // Version that wrote the app config before this run; empty when there was no app config.
+    const boost::optional<Semver>& last_config_version() const { return m_last_config_version; }
 
-    // Dynamic printer agent switching
+    // Reconcile the live printer agent with the stored preset selection.
     void switch_printer_agent();
+
+    std::string resolve_printer_agent_id(const std::string& stored_id) const;
+    // ORCA TODO: in the future, bbl presets should specify "bbl" printer agent id
+    // then, all resolve and canonical would just be ORCA<->""
+    std::string canonical_printer_agent_id(const std::string& picked_id);
 
     FilamentColorCodeQuery* get_filament_color_code_query();
     bool is_editor() const { return m_app_mode == EAppMode::Editor; }
     bool is_gcode_viewer() const { return m_app_mode == EAppMode::GCodeViewer; }
     bool is_recreating_gui() const { return m_is_recreating_gui; }
+    // Milliseconds since the last mouse or keyboard event the app processed, or main window resize.
+    int  input_idle_ms() const;
+    int  FilterEvent(wxEvent& event) override;
+    // The Preferences "Default page" choice, stored as its index: 0 Home, 1 Prepare.
+    bool starts_on_prepare() const;
     std::string logo_name() const { return is_editor() ? "OrcaSlicer" : "OrcaSlicer-gcodeviewer"; }
 
     bool is_closing() const { return m_is_closing.load(std::memory_order_acquire); }
@@ -390,12 +441,17 @@ public:
 
     bool show_plate_gridlines() const { return app_config->get_bool("show_plate_gridlines"); }
     void toggle_show_plate_gridlines() const { app_config->set_bool("show_plate_gridlines", !show_plate_gridlines()); }
+    bool focus_mode() const { return app_config->get_bool("focus_mode"); }
+    void toggle_focus_mode() const { app_config->set_bool("focus_mode", !focus_mode()); }
 
     bool show_canvas_zoom_button() const { return app_config->get_bool("show_canvas_zoom_button"); }
     void toggle_canvas_zoom_button() const { app_config->set_bool("show_canvas_zoom_button", !show_canvas_zoom_button()); }
 
     bool show_outline() const { return app_config->get_bool("show_outline"); }
     void toggle_show_outline() const { app_config->set_bool("show_outline", !show_outline()); }
+
+    bool show_center_of_mass() const { return app_config->get_bool("show_center_of_mass"); }
+    void toggle_show_center_of_mass() const { app_config->set_bool("show_center_of_mass", !show_center_of_mass()); }
 
     wxString get_inf_dialog_contect () {return m_info_dialog_content;};
 
@@ -415,6 +471,9 @@ public:
 #if wxUSE_WEBVIEW_EDGE
     void            init_webview_runtime();
 #endif
+    // Switches to the Home tab and opens the OrcaCloud pane beside the homepage on `next`, a
+    // same-site OrcaCloud path (empty = the page's default). Work is deferred internally.
+    void            open_orca_cloud(const std::string& next = std::string());
     static unsigned get_colour_approx_luma(const wxColour& colour);
     static bool     dark_mode();
     const wxColour  get_label_default_clr_system();
@@ -475,8 +534,7 @@ public:
     void            check_printer_presets();
 
     void            recreate_GUI(const wxString& message);
-    void            system_info();
-    void            keyboard_shortcuts();
+    void            keyboard_shortcuts(ShortcutContext page, wxWindow* parent = nullptr);   // the main frame when null
     void            troubleshoot();
     void            load_project(wxWindow *parent, wxString& input_file) const;
     void            import_model(wxWindow *parent, wxArrayString& input_files) const;
@@ -493,11 +551,15 @@ public:
     bool            check_login(const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            get_login_info(const std::string& provider = ORCA_CLOUD_PROVIDER);
     bool            is_user_login(const std::string& provider = ORCA_CLOUD_PROVIDER);
-    const std::string& get_printer_cloud_provider() const;
+    std::string      get_printer_cloud_provider() const;
 
     void            request_user_login(int online_login = 0, const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            request_user_handle(int online_login = 0, const std::string& provider = ORCA_CLOUD_PROVIDER);
-    void            request_user_logout(const std::string& provider = ORCA_CLOUD_PROVIDER);
+    // `user_initiated` distinguishes a user sign-out from the desktop losing its session on its
+    // own (refresh failed, 401). Only an explicit sign-out also ends the cloud webview's own
+    // session; an involuntary one leaves the webview alone (guide §8). Defaults to the safe
+    // direction: a new caller that forgets the flag will not silently sign the webview out.
+    void            request_user_logout(const std::string& provider = ORCA_CLOUD_PROVIDER, bool user_initiated = false);
     void            post_logout_to_webview(const std::string& provider);
     int             request_user_unbind(std::string dev_id, const std::string& provider = ORCA_CLOUD_PROVIDER);
     std::string     handle_web_request(std::string cmd);
@@ -513,7 +575,16 @@ public:
     void            on_update_machine_list(wxCommandEvent& evt);
     void            on_user_login(wxCommandEvent &evt);
     void            on_user_login_handle(wxCommandEvent& evt);
-    void            enable_user_preset_folder(bool enable, const std::string& provider = ORCA_CLOUD_PROVIDER);
+    // OrcaCloud webview session handoff (guide §5/§7). cloud_webview_handoff builds the cloud
+    // pane's Start URL (with the desktop user_id while signed in). request_cloud_web_session is
+    // called from the pane when the page asks for a session; it opens the desktop login dialog if
+    // signed out, otherwise mints a one-time token on a worker thread and loads the Complete URL
+    // in the same webview.
+    wxString        cloud_webview_handoff(const std::string& next = std::string());
+    void            request_cloud_web_session(const std::string& state);
+    void            mint_cloud_web_session(const std::string& state, uint64_t gen);
+    void            on_cloud_web_session_minted(const std::string& state, uint64_t gen, const std::string& token_hash);
+    void            enable_user_preset_folder(bool enable);
 
     // BBS
     bool            is_studio_active();
@@ -524,10 +595,12 @@ public:
     void            check_update(bool show_tips, int by_user);
     void            check_new_version(bool show_tips = false, int by_user = 0);
     void            check_new_version_sf(bool show_tips = false, int by_user = 0);
+    // Offers to migrate user filament presets made against an older release that lost printers their parent
+    // listed then. At startup it asks on every start that finds such presets, unless the user chose not to be
+    // reminded; while the user presets sync with the cloud, it waits until they have been pulled. by_user also
+    // reports when there is nothing to migrate.
+    void            check_legacy_user_filament_presets(bool by_user);
     bool            process_network_msg(std::string dev_id, std::string msg);
-    void            begin_bmcu_auto_retry(const std::string& dev_id, int timeout_ms = 25000);
-    void            finish_bmcu_auto_retry(const std::string& dev_id = std::string());
-    bool            is_bmcu_auto_retry_active(const std::string& dev_id = std::string());
     void            request_new_version(int by_user);
     void            enter_force_upgrade();
     void            set_skip_version(bool skip = true);
@@ -536,7 +609,8 @@ public:
     std::string     format_IP(const std::string& ip);
     void            show_dialog(wxString msg);
     void            push_notification(const MachineObject* obj, wxString msg, wxString title = wxEmptyString, UserNotificationStyle style = UserNotificationStyle::UNS_NORMAL);
-    void            reload_settings(const std::string& provider = ORCA_CLOUD_PROVIDER);
+    // Returns false when the cloud presets could not be fetched, so nothing was reloaded.
+    bool            reload_settings();
     void            remove_user_presets();
 
     bool            maybe_migrate_user_presets_on_login();
@@ -546,10 +620,10 @@ public:
     void            add_pending_vendor_preset(const std::pair<std::string, std::map<std::string, std::string>>& preset_data);
     void            load_pending_vendors();
 
-    void            sync_preset(Preset* preset, bool force = false, const std::string& provider = ORCA_CLOUD_PROVIDER);
-    void            start_sync_user_preset(bool with_progress_dlg = false, const std::string& provider = ORCA_CLOUD_PROVIDER);
+    void            sync_preset(Preset* preset, bool force = false);
+    void            start_sync_user_preset(bool with_progress_dlg = false);
     void            stop_sync_user_preset();
-    void            restart_sync_user_preset(const std::string& provider = ORCA_CLOUD_PROVIDER);
+    void            restart_sync_user_preset();
     // Resolve a cloud sync 409 by force-pushing the conflicting preset: clears the "hold"
     // state the conflict left behind and queues it to be re-uploaded with force=true.
     void            force_push_conflicting_preset(const std::string& setting_id);
@@ -571,7 +645,6 @@ public:
     void            start_http_server(const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            start_http_server(int port, const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            stop_http_server();
-    void            switch_staff_pick(bool on);
 
     void            on_show_check_privacy_dlg(int online_login = 0, const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            show_check_privacy_dlg(wxCommandEvent& evt);
@@ -585,7 +658,6 @@ public:
     void            persist_window_geometry(wxTopLevelWindow *window, bool default_maximized = false);
     void            update_ui_from_settings();
 
-    bool            switch_language();
     bool            load_language(wxString language, bool initial);
 
     Tab*            get_tab(Preset::Type type);
@@ -597,6 +669,11 @@ public:
     std::string     get_saved_mode_str();
     std::string     get_mode_str();
     void            save_mode(const /*ConfigOptionMode*/int mode) ;
+    // Switch to `mode` from the Speed Dial: a developer-mode override hides the saved mode
+    // (get_mode returns comDevelop), so clear it first and persist the choice.
+    void            set_mode(ConfigOptionMode mode);
+    // Turn the developer-mode override on and refresh the UI (used before jumping to a Developer setting).
+    void            enable_developer_mode();
     void            update_mode();
     void            update_internal_development();
     void            show_ip_address_enter_dialog(wxString title = wxEmptyString);
@@ -620,7 +697,7 @@ public:
     void            load_current_presets(bool active_preset_combox = false, bool check_printer_presets = true);
     std::map<std::string, std::string> &get_delete_cache_presets();
     std::map<std::string, std::string> get_delete_cache_presets_lock();
-    void            process_delete_presets(const std::string& provider = ORCA_CLOUD_PROVIDER);
+    void            process_delete_presets();
     void            delete_preset_from_cloud(std::string setting_id, std::string preset_file_path);
     void            preset_deleted_from_cloud(std::string setting_id);
     void            scan_orphaned_info_files();
@@ -632,9 +709,13 @@ public:
     wxString 		current_language_code_safe() const;
     bool            is_localized() const { return m_wxLocale->GetLocale() != "English"; }
 
-    void            open_preferences(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
+    void            open_preferences();   // on the General tab
+    void            open_preferences(PreferencesTab tab, const std::string& highlight_option = std::string());
     void            open_presetbundledialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
     void            open_plugins_dialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
+    // Dialog-free plugin actions used by the speed dial: they never require the Plugins dialog to be open.
+    void            refresh_plugins();
+    void            install_local_plugin();
     void            open_terminal_dialog();
     void            open_speed_dial();
     ActionRegistry& action_registry() { return m_action_registry; }
@@ -642,8 +723,6 @@ public:
     virtual bool OnExceptionInMainLoop() override;
     // Calls wxLaunchDefaultBrowser if user confirms in dialog.
     bool            open_browser_with_warning_dialog(const wxString& url, int flags = 0);
-    bool            is_bambu_web_url(const wxString& url) const;
-    bool            open_bambu_web_page(const wxString& url, bool bind_ticket = false);
 #ifdef __APPLE__
     void            OSXStoreOpenFiles(const wxArrayString &files);
     // wxWidgets override to get an event on open files.
@@ -729,6 +808,9 @@ public:
 	size_t      get_instance_hash_int ()              { return m_instance_hash_int; }
 
     ImGuiWrapper* imgui() { return m_imgui.get(); }
+    ShortcutRegistry& shortcuts() { return *m_shortcuts; }
+    // Saves the bindings and refreshes every menu label, tooltip and accelerator table that shows one.
+    void          on_shortcuts_changed();
 
     PrintHostJobQueue& printhost_job_queue() { return *m_printhost_job_queue.get(); }
 
@@ -761,9 +843,8 @@ public:
     void            start_download(std::string url);
 
     std::string     get_plugin_url(std::string name, std::string country_code);
-    int             download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn = nullptr, WasCancelledFn cancel_fn = nullptr, std::string* downloaded_version = nullptr);
-    int             install_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn = nullptr, WasCancelledFn cancel_fn = nullptr, const std::string& package_version = {});
-    bool            rollback_network_plugin_payload(std::string* error = nullptr);
+    int             download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn = nullptr, WasCancelledFn cancel_fn = nullptr);
+    int             install_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn = nullptr, WasCancelledFn cancel_fn = nullptr);
     std::string     get_http_url(std::string country_code, std::string path = {});
     std::string     get_model_http_url(std::string country_code);
     bool            use_legacy_network_plugin() const;
@@ -783,6 +864,7 @@ public:
     std::string     get_latest_network_version() const;
     bool            has_network_update_available() const;
     // Orca: return the client version to report to Bambu servers. Pinned to
+    // 01.10.01.50 when the legacy network plugin lacks get_my_token support
     // so the auth server stays on the ?access_token= redirect path.
     std::string     get_bbl_client_version();
 
@@ -805,7 +887,11 @@ private:
     bool            window_pos_restore(wxTopLevelWindow* window, const std::string &name, bool default_maximized = false);
     void            window_pos_sanitize(wxTopLevelWindow* window);
     void            window_pos_center(wxTopLevelWindow *window);
-    bool            select_language();
+
+    // Dynamic printer agent selection - internal helpers for switch_printer_agent
+    // and the plugin load/unload callbacks (init_plugin_gui_wiring).
+    void refresh_printer_agent_dropdown();
+    void set_live_printer_agent(std::shared_ptr<IPrinterAgent> agent); // null clears the selection
 
     bool            config_wizard_startup();
 	void            check_updates(const bool verbose);
@@ -831,7 +917,9 @@ wxDECLARE_EVENT(EVT_UPDATE_BUNDLE_COMPLETE, wxCommandEvent);
 bool is_support_filament(int extruder_id, bool strict_check = true);
 bool is_soluble_filament(int extruder_id);
 // check if the filament for model is in the list
-bool has_filaments(const std::vector<string>& model_filaments);
+bool has_filaments(const std::vector<std::string>& model_filaments);
+// Up direction of the edited printer's tilted build plate (+Z when untilted).
+Vec3d build_plate_tilt_up_direction();
 } // namespace GUI
 } // Slic3r
 

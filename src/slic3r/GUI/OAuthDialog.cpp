@@ -5,6 +5,16 @@
 #include "Jobs/PlaterWorker.hpp"
 #include "wxExtensions.hpp"
 #include "Widgets/DialogButtons.hpp"
+#include "slic3r/GUI/Jobs/OAuthJob.hpp"
+#include "slic3r/GUI/GUI_Utils.hpp"
+#include <wx/event.h>
+#include <wx/gdicmn.h>
+#include <wx/dialog.h>
+#include <memory>
+#include <wx/sizer.h>
+#include "slic3r/GUI/Jobs/Worker.hpp"
+#include <utility>
+#include <wx/utils.h>
 
 namespace Slic3r {
 namespace GUI {
@@ -61,7 +71,7 @@ bool OAuthDialog::Show(bool show)
         replace_job(*m_worker, std::move(job));
 
         // Open login URL in external browser
-        wxGetApp().open_browser_with_warning_dialog(_params.login_url);
+        wxLaunchDefaultBrowser(_params.login_url);
     }
 
     return DPIDialog::Show(show);

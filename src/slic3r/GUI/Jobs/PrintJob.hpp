@@ -3,11 +3,14 @@
 
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <functional>
+#include <string>
+#include <wx/string.h>
+#include <exception>
+#include <cstddef>
 #include "libslic3r/PrintConfig.hpp"
 #include "Job.hpp"
 #include "slic3r/GUI/DeviceCore/DevStorage.h" 
-
-namespace fs = boost::filesystem;
 
 namespace Slic3r {
 namespace GUI {
@@ -21,9 +24,9 @@ class PrintPrepareData
 public:
     bool            is_from_plater = true;
     int             plate_idx;
-    fs::path        _3mf_path;
-    fs::path        _3mf_config_path;
-    fs::path        _temp_path;
+    boost::filesystem::path _3mf_path;
+    boost::filesystem::path _3mf_config_path;
+    boost::filesystem::path _temp_path;
     PrintPrepareData() {
         plate_idx = 0;
     }
@@ -43,6 +46,9 @@ class PrintJob : public Job
     std::function<void()> m_success_fun{nullptr};
     std::string         m_dev_id;
     bool                m_job_finished{ false };
+    bool                m_lifecycle_started{ false };
+    bool                m_lifecycle_finished{ false };
+    bool                m_lifecycle_success{ false };
     int                 m_print_job_completed_id = 0;
     wxString            m_completed_evt_data;
     std::function<void()> m_enter_ip_address_fun_fail{ nullptr };
@@ -99,7 +105,7 @@ public:
         int auto_bed_levelingt,
         int auto_flow_calit,
         int auto_offset_calit,
-        int extruder_cali_manual_mode_value = -1)
+        int extruder_cali_manual_modet = -1)
     {
         task_bed_type       = bed_type;
         task_bed_leveling   = bed_leveling;
@@ -112,7 +118,7 @@ public:
         auto_bed_leveling = auto_bed_levelingt;
         auto_flow_cali = auto_flow_calit;
         auto_offset_cali = auto_offset_calit;
-        extruder_cali_manual_mode = extruder_cali_manual_mode_value;
+        extruder_cali_manual_mode = extruder_cali_manual_modet;
 
     }
 

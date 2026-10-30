@@ -1,52 +1,47 @@
 #include "HMS.hpp"
 
 #include "GUI.hpp"
+#include "GUI_App.hpp"
 #include "DeviceManager.hpp"
 #include "DeviceCore/DevManager.h"
 #include "DeviceCore/DevUtil.h"
+#include "Http.hpp"
+#include <nlohmann/json.hpp>
 #include "libslic3r/AppConfig.hpp"
 
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/directory.hpp>
+#include <boost/algorithm/string/case_conv.hpp>
 #include <boost/log/trivial.hpp>
+#include <unordered_set>
+#include <string>
+#include "libslic3r/Utils.hpp"
+#include <fstream>
+#include <ostream>
+#include <wx/string.h>
+#include <vector>
+#include <cstdio>
+#include <wx/image.h>
+#include <mutex>
+#include <ctime>
+
+namespace fs = boost::filesystem;
+using json = nlohmann::json;
 
 static const char* HMS_PATH = "hms";
 static const char* HMS_LOCAL_IMG_PATH = "hms/local_image";
 
 // the local HMS info
 // Orca: dev-id-type set trimmed to the devices Orca ships local HMS images for
-static unordered_set<string> package_dev_id_types {"094", "239", "093", "22E"};
+static std::unordered_set<std::string> package_dev_id_types {"094", "239", "093", "22E"};
 
-namespace {
-
-inline bool is_auto_ignored_hms_error_code(const std::string& raw_error_code)
-{
-    std::string error_code = boost::to_upper_copy(raw_error_code);
-    if (error_code.size() >= 8)
-        error_code = error_code.substr(0, 8);
-
-    return error_code == "0500409D" ||
-           error_code == "0501409D" ||
-           error_code == "0502409D" ||
-           error_code == "0503409D";
-}
-
-inline bool is_expected_task_cancel_error_code(const std::string& raw_error_code)
-{
-    std::string error_code = boost::to_upper_copy(raw_error_code);
-    if (error_code.size() >= 8)
-        error_code = error_code.substr(0, 8);
-
-    return error_code == "0300400C";
-}
-
-bool should_disable_hms()
+// Orca: HMS should be disabled when stealth mode is on or networking is not installed
+static bool should_disable_hms()
 {
     Slic3r::AppConfig* config = Slic3r::GUI::wxGetApp().app_config;
-    if (!config)
-        return true;
+    if (!config) return true;
     return config->get_stealth_mode() || !config->get_bool("installed_networking");
 }
-
-} // namespace
 
 namespace Slic3r {
 namespace GUI {
@@ -70,7 +65,7 @@ int get_hms_info_version(std::string& version)
     std::string url = (boost::format("https://%1%/GetVersion.php?%2%") % hms_host % query_params).str();
     Slic3r::Http http = Slic3r::Http::get(url);
     http.timeout_max(10)
-        .on_complete([&result, &version](std::string body, unsigned status){
+        .on_complete([&version](std::string body, unsigned status){
             try {
                 json j = json::parse(body);
                 if (j.contains("ver")) {
@@ -119,7 +114,7 @@ int HMSQuery::download_hms_related(const std::string& hms_type, const std::strin
 
     BOOST_LOG_TRIVIAL(info) << "hms: download url = " << url;
     Slic3r::Http http = Slic3r::Http::get(url);
-    http.on_complete([this, receive_json, hms_type, &to_save_local, &j, & local_version](std::string body, unsigned status) {
+    http.on_complete([receive_json, hms_type, &to_save_local, &j, & local_version](std::string body, unsigned status) {
         try {
             j = json::parse(body);
             if (j.contains("result")) {
@@ -350,28 +345,24 @@ wxString HMSQuery::query_hms_msg(const std::string& dev_id, const std::string& l
     return _query_hms_msg(dev_id.substr(0, 3), long_error_code, lang_code);
 }
 
-string HMSQuery::get_dev_id_type(const MachineObject* obj) const
+std::string HMSQuery::get_dev_id_type(const MachineObject* obj) const
 {
     if (obj)
     {
         return obj->get_dev_id().substr(0, 3);
     }
 
-    return string();
+    return std::string();
 }
 
-wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_error_code, const string& lang_code)
+wxString HMSQuery::_query_hms_msg(const std::string& dev_id_type, const std::string& long_error_code, const std::string& lang_code)
 {
-    if (long_error_code.empty() ||
-        is_auto_ignored_hms_error_code(long_error_code) ||
-        is_expected_task_cancel_error_code(long_error_code))
+    if (long_error_code.empty())
     {
         return wxEmptyString;
     }
 
     init_hms_info(dev_id_type);
-
-    std::lock_guard<std::mutex> lock(m_hms_mutex);
     auto iter = m_hms_info_jsons.find(dev_id_type);
     if (iter == m_hms_info_jsons.end())
     {
@@ -386,16 +377,15 @@ wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_
         return wxEmptyString;
     }
 
-    auto device_hms_iter = m_hms_info_json.find("device_hms");
-    if (device_hms_iter == m_hms_info_json.end() || !device_hms_iter->is_object())
+    const json& device_hms_json = m_hms_info_json.value("device_hms", json());
+    if (device_hms_json.is_null() || !device_hms_json.is_object())
     {
         BOOST_LOG_TRIVIAL(error) << "there are no valid json object named device_hms";
         return wxEmptyString;
     }
 
-    const json& device_hms_json = *device_hms_iter;
-    auto lang_iter = device_hms_json.find(lang_code);
-    if (lang_iter == device_hms_json.end() || lang_iter->is_null())
+    const json& device_hms_msg_json = device_hms_json.value(lang_code, json());
+    if (device_hms_msg_json.is_null())
     {
         BOOST_LOG_TRIVIAL(error) << "hms: query_hms_msg, do not contains lang_code = " << lang_code;
         if (lang_code.empty()) /*traverse all if lang_code is empty*/
@@ -406,14 +396,11 @@ wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_
                 {
                     if (msg_item.is_object())
                     {
-                        auto error_code_iter = msg_item.find("ecode");
-                        auto intro_iter = msg_item.find("intro");
-                        if (error_code_iter != msg_item.end() && error_code_iter->is_string() &&
-                            intro_iter != msg_item.end() && intro_iter->is_string() &&
-                            boost::to_upper_copy(error_code_iter->get<std::string>()) == long_error_code)
+                        const std::string& error_code = msg_item.value("ecode", json()).get<std::string>();
+                        if (boost::to_upper_copy(error_code) == long_error_code && msg_item.contains("intro"))
                         {
                             BOOST_LOG_TRIVIAL(info) << "retry without lang_code successed.";
-                            return wxString::FromUTF8(intro_iter->get<std::string>());
+                            return wxString::FromUTF8(msg_item["intro"].get<std::string>());
                         }
                     }
                 }
@@ -423,18 +410,14 @@ wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_
         return wxEmptyString;
     }
 
-    const json& device_hms_msg_json = *lang_iter;
     for (const auto& item : device_hms_msg_json)
     {
         if (item.is_object())
         {
-            auto error_code_iter = item.find("ecode");
-            auto intro_iter = item.find("intro");
-            if (error_code_iter != item.end() && error_code_iter->is_string() &&
-                intro_iter != item.end() && intro_iter->is_string() &&
-                boost::to_upper_copy(error_code_iter->get<std::string>()) == long_error_code)
+            const std::string& error_code = item.value("ecode", json()).get<std::string>();
+            if (boost::to_upper_copy(error_code) == long_error_code && item.contains("intro"))
             {
-                return wxString::FromUTF8(intro_iter->get<std::string>());
+                return wxString::FromUTF8(item["intro"].get<std::string>());
             }
         }
     }
@@ -443,18 +426,11 @@ wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_
     return wxEmptyString;
 }
 
-bool HMSQuery::_is_internal_error(const string &dev_id_type,
-                                  const string &error_code,
-                                  const string &lang_code)
+bool HMSQuery::_is_internal_error(const std::string &dev_id_type,
+                                  const std::string &error_code,
+                                  const std::string &lang_code)
 {
-    if (is_auto_ignored_hms_error_code(error_code) ||
-        is_expected_task_cancel_error_code(error_code)) {
-        return true;
-    }
-
     init_hms_info(dev_id_type);
-
-    std::lock_guard<std::mutex> lock(m_hms_mutex);
     auto iter = m_hms_info_jsons.find(dev_id_type);
     if (iter == m_hms_info_jsons.end()) { return false; }
 
@@ -487,14 +463,7 @@ wxString HMSQuery::_query_error_msg(const std::string &dev_id_type,
                                     const std::string& error_code,
                                     const std::string& lang_code)
 {
-    if (is_auto_ignored_hms_error_code(error_code) ||
-        is_expected_task_cancel_error_code(error_code)) {
-        return wxEmptyString;
-    }
-
     init_hms_info(dev_id_type);
-
-    std::lock_guard<std::mutex> lock(m_hms_mutex);
     auto iter = m_hms_info_jsons.find(dev_id_type);
     if (iter == m_hms_info_jsons.end())
     {
@@ -538,14 +507,8 @@ wxString HMSQuery::_query_error_msg(const std::string &dev_id_type,
 
 wxString HMSQuery::_query_error_image_action(const std::string& dev_id_type, const std::string& long_error_code, std::vector<int>& button_action)
 {
-    if (is_auto_ignored_hms_error_code(long_error_code) ||
-        is_expected_task_cancel_error_code(long_error_code)) {
-        return wxEmptyString;
-    }
-
     init_hms_info(dev_id_type);
 
-    std::lock_guard<std::mutex> lock(m_hms_mutex);
     auto iter = m_hms_action_jsons.find(dev_id_type);
     if (iter == m_hms_action_jsons.end())
     {
@@ -617,10 +580,6 @@ wxString HMSQuery::query_print_image_action(const MachineObject* obj, int print_
 
     char buf[32];
     ::sprintf(buf, "%08X", print_error);
-    if (is_auto_ignored_hms_error_code(std::string(buf)) ||
-        is_expected_task_cancel_error_code(std::string(buf))) {
-        return wxEmptyString;
-    }
     //The first three digits of SN number
     const auto result = _query_error_image_action(get_dev_id_type(obj),std::string(buf), button_action);
     if (should_disable_hms() && result.Contains("http")) {

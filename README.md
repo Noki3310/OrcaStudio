@@ -1,56 +1,263 @@
-# OrcaStudio · X1C Community Edition
+<div align="center">
 
-Deutschsprachiger Community-Fork von [OrcaStudio](https://github.com/jarczakpawel/OrcaStudio), gepflegt von **Noki3310**. Schwerpunkt sind die Bedienung des **Bambu Lab X1 Carbon mit Firmware 01.09.01.00**, AMS-HT-Trocknungssteuerung und deutsche Bedienoberflächen.
+<picture>
+  <img alt="OrcaSlicer logo" src="resources/images/OrcaSlicer.png" width="15%" height="15%">
+</picture>
 
-**Unabhängiges Community-Projekt. Keine offizielle Veröffentlichung von Bambu Lab, OrcaSlicer oder dem ursprünglichen OrcaStudio-Projekt.**
+<a href="https://trendshift.io/repositories/15552" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15552" alt="OrcaSlicer%2FOrcaSlicer | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-## Download
+[![GitHub Repo stars](https://img.shields.io/github/stars/OrcaSlicer/OrcaSlicer)](https://github.com/OrcaSlicer/OrcaSlicer/stargazers) [![Build all](https://img.shields.io/github/actions/workflow/status/OrcaSlicer/OrcaSlicer/main_build_status.yml?label=Build%20all)](https://github.com/OrcaSlicer/OrcaSlicer/actions/workflows/build_all.yml)
 
-**[Windows-Installer und Versionshinweise](https://github.com/Noki3310/OrcaStudio/releases/tag/v02.08.01.55-x1c-de2-rc1)** · [Installation](docs/INSTALLATION_DE.md) · [Änderungen](CHANGELOG.md) · [Teststand](docs/TESTSTATUS_DE.md) · [English](docs/README_EN.md)
+OrcaSlicer: an open source Next-Gen Slicing Software for Precision 3D Prints.  
+Optimize your prints with ultra-fast slicing, intelligent support generation, and seamless printer compatibility—engineered for perfection.
 
-Die erste Veröffentlichung ist eine **Vorabversion (RC1)**. Empfohlen ist die Datei `OrcaStudio_Windows_Installer_V02.08.01.55-x1c-controls-de2.exe`. WSL 2 ist für die Windows-Netzwerkanbindung erforderlich. Für diese Edition werden zunächst nur Windows-Installationsdateien angeboten; macOS und Linux sind nicht als eigene Release-Binaries geprüft.
+# Official links and community
 
-## Was dieser Fork ergänzt
+#### Official Website:
 
-- Korrektur eines Nullzeigerzugriffs beim Abbruch von HTTP-Abfragen im Linux-Runtime-Forwarder. Der zuvor beim Türöffnen beobachtete Absturz trat nach dem Patch im Nutzertest nicht mehr auf.
-- Düsentyp und Düsendurchmesser für den verbundenen, untätigen X1C wieder im Gerätebereich ändern. Während Druck, Kalibrierung oder fehlender Verbindung gelten Sperren; der Durchflusstyp bleibt nur lesbar.
-- AMS-HT-Trocknung über Orca starten und stoppen, Temperatur und Dauer einstellen, abhängig vom gemeldeten Gerätezustand und den Materialgrenzen.
-- Eigene Trocknungsprofile mit Name, Materialkennung, Temperatur und Stunden speichern, laden, aktualisieren und löschen.
-- Trocknungsstatus besser unterscheiden: Trocknen, Abkühlen, Stoppen, Fehler und unbekannte Zustände. Temperatur allein gilt nicht als Heiznachweis.
-- Deutsche Übersetzungen ergänzt; der Trocknungsbutton heißt nicht mehr „Kalibrierung starten“.
-- Trocknen bei unbesetztem HT-Einzug ermöglichen, soweit Gerätestatus und Schutzbedingungen dies zulassen. Ein unbekanntes Material im belegten Einzug wird dadurch nicht freigegeben.
+<a href="https://www.orcaslicer.com/" style="font-size:2em;">OrcaSlicer.com</a>
 
-Die ursprüngliche Linux-Netzwerkbrücke und WSL-Integration stammen aus dem vorgelagerten OrcaStudio-Projekt. Details zur Herkunft stehen in [AUTHORS.md](AUTHORS.md) und im [bewahrten Upstream-README](docs/upstream/README.md).
+#### Github Repository:
 
-## Was bestätigt ist und was noch offen ist
+<a href="https://github.com/OrcaSlicer/OrcaSlicer"><img src="https://img.shields.io/badge/OrcaSlicer-181717?style=flat&logo=github&logoColor=white" width="200" alt="GitHub Logo"/> </a>
 
-| Funktion | Stand |
-| --- | --- |
-| Windows-Build einschließlich Installer | GitHub Actions erfolgreich, Quellstand `306d5e6d` |
-| Türöffnungsabsturz nach Patch | Laut Nutzerrückmeldung nicht mehr aufgetreten |
-| Trocknung vom Drucker aus starten und über Orca stoppen | Vom Nutzer bestätigt |
-| Trocknung über Orca starten | Vom Nutzer bestätigt |
-| Trocknung läuft während Druck mit externer Spule/Bypass weiter | Vom Nutzer bestätigt |
-| Gleichzeitig trocknen und aktiv aus demselben HT fördern | **Nicht bestätigt** |
-| Trocknungsprofile und Bedienoberfläche: weitere Praxistests stehen noch aus. | Noch offen |
-| Standalone-Trocknung bei ausgeschaltetem X1C | **Nicht Bestandteil dieses Forks** |
+#### Follow us:
 
-Der Legacy-Kompatibilitätspfad ist im Code auf X1C-Firmware **01.09.01.00** und AMS HT (**N3S**) begrenzt. Andere Firmwarestände sind dadurch nicht automatisch unterstützt. Die normale geräteseitig gemeldete Trocknungsunterstützung bleibt bestehen. Es wird keine Druckerfirmware verändert und kein fehlender Status als Erfolg ausgegeben.
+<a href="https://twitter.com/real_OrcaSlicer"><img src="https://img.shields.io/badge/real__OrcaSlicer-000000?style=flat&logo=x&logoColor=white" width="200" alt="X Logo"/> </a>  
+<a href="https://www.youtube.com/@OfficialOrcaSlicer"><img src="https://img.shields.io/badge/OfficialOrcaSlicer-FF0000?style=flat&logo=youtube&logoColor=white" width="200" alt="YouTube Logo"/> </a>
 
-## Bedienung
+#### Join our Discord community:
 
-- **Düse:** Gerät → Drucker-Teile. Nur die tatsächlich eingebaute Düse auswählen und die Rückmeldung des Druckers kontrollieren.
-- **Trocknung:** Im Gerätebereich die Feuchtigkeits-/Trocknungsanzeige des AMS HT öffnen. Material, Temperatur und Stunden auswählen; Start und Stopp beziehen sich auf den ausgewählten HT.
-- **Zoom zur Maus:** Einstellungen → Steuerung → Kamera → „Zum Mausposition zoomen“. Diese Funktion war bereits vorhanden; für diese Veröffentlichung wurde kein Zoom-Patch benötigt.
+<a href="https://discord.gg/P4VE9UY9gJ"><img src="https://img.shields.io/badge/-Discord-5865F2?style=flat&logo=discord&logoColor=fff" width="200" alt="discord logo"/> </a>
 
-## Fehler melden und mitarbeiten
+<table border="2" style="border-color: #ffa500; background-color:rgb(232, 220, 180); color: #856404;">
+<tr>
+<td>
+<strong>⚠️ CAUTION:</strong><br>
+Several clickbait and malicious websites, such as <b>orca-slicer[.]com</b> and <b>orcaslicer[.]net</b>, are pretending to be the official OrcaSlicer site. These sites may redirect you to dangerous downloads or contain misleading information.<br>
+<b>Our only official website is <a href="https://www.orcaslicer.com/">www.orcaslicer.com</a>.</b><br><br>
+If you come across any of these in search results, please <b>report them</b> as unsafe or phishing to help keep the community secure with:<br>
+ - <a href="https://safebrowsing.google.com/safebrowsing/report_phish/">Google Safe Browsing</a><br>
+ - <a href="https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site">Microsoft Security Intelligence</a><br>
+ - <a href="https://ipthreat.net/tools/reportphishing">IPThreat</a>
+</td>
+</tr>
+</table>
 
-[Fehler melden](https://github.com/Noki3310/OrcaStudio/issues/new/choose). Bitte Build, Windows-Version, Drucker-/HT-Firmware, Filamentquelle und konkrete Schritte angeben. Zugangscodes, Tokens, Kontodaten und Seriennummern vor dem Hochladen aus Logs entfernen. [Hinweise zur Mitarbeit](CONTRIBUTING.md).
+</div>
 
-## Lizenz und Quellcode
+# Main features
 
-Die Anwendung bleibt unter der **GNU AGPL v3** gemäß [LICENSE.txt](LICENSE.txt). Vorhandene Copyright- und Lizenzvermerke bleiben erhalten. Fremdkomponenten haben eigene Lizenzbedingungen; siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **[Advanced Calibration Tools](https://www.orcaslicer.com/wiki/calibration_guide)**  
+  Comprehensive suite: temperature towers, flow rate, retraction & more for optimal performance.
+- **[Precise Wall](https://www.orcaslicer.com/wiki/quality_settings_precision#precise-wall) and [Seam Control](https://www.orcaslicer.com/wiki/quality_settings_seam)**  
+  Adjust outer wall spacing and apply scarf seams to enhance print accuracy.
+- **[Sandwich Mode](https://www.orcaslicer.com/wiki/quality_settings_wall_and_surfaces#innerouterinner) and [Polyholes](https://www.orcaslicer.com/wiki/quality_settings_precision#polyholes) Support**  
+  Use varied infill [patterns](https://www.orcaslicer.com/wiki/strength_settings_patterns) and accurate hole shapes for improved clarity.
+- **[Overhang](https://www.orcaslicer.com/wiki/quality_settings_overhangs) and [Support Optimization](https://www.orcaslicer.com/wiki#support-settings)**  
+  Modify geometry for printable overhangs with precise support placement.
+- **[Granular Controls and Customization](https://www.orcaslicer.com/wiki#process-settings)**  
+  Fine-tune print speed, layer height, pressure, and temperature with precision.
+- **Network Printer Support**  
+  Seamless integration with Klipper, PrusaLink, and OctoPrint for remote control.
+- **[Mouse Ear Brims](https://www.orcaslicer.com/wiki/others_settings_brim) & [Adaptive Bed Mesh](https://www.orcaslicer.com/wiki/printer_basic_information_adaptive_bed_mesh)**  
+  Automatic brims and adaptive mesh calibration ensure consistent adhesion.
+- **User-Friendly Interface**  
+  Intuitive drag-and-drop design with pre-made profiles for popular printers.
+- **[Open-Source](https://github.com/OrcaSlicer/OrcaSlicer) & [Community Driven](https://discord.gg/P4VE9UY9gJ)**  
+  Regular updates fueled by continuous community contributions.
+- **Wide Printer Compatibility**  
+  Supports a broad range of printers: Bambu Lab, Prusa, Creality, Voron, and more.
+- **[Belt Printer Support](https://www.orcaslicer.com/wiki/belt_printing)**  
+  Slice for belt / conveyor (infinite-Z) printers, with belt-aware supports and a tilted-bed preview. Contributed by [Joseph Robertson (@HarrierPigeon)](https://github.com/HarrierPigeon).
+- **[IDEX/IQEX Parallel Printing Support](https://www.orcaslicer.com/wiki/idex_iqex_parallel_printing)**  
+  Print copies or mirror images of a part on every carriage of an IDEX or IQEX printer at once, with the mode chosen per plate and nozzle clearance zones shown on the bed. Contributed by [Clifford (@cgarwood82)](https://github.com/cgarwood82).
+- Additional features can be found in the [change notes](https://github.com/OrcaSlicer/OrcaSlicer/releases/).
 
-[Exakter Anwendungsquellstand des Installers](https://github.com/Noki3310/OrcaStudio/tree/306d5e6dfec7834ec7fbebd16531b6156d8be657) · [Build und Quellen](docs/BUILD_AND_SOURCE.md) · [Datenschutz und Netzwerk](docs/PRIVACY_DE.md)
+# Wiki
 
-Das proprietäre Bambu-Netzwerkplugin gehört nicht zum offenen Quellcode dieses Forks. Die Upstream-Architektur lädt es bei Bedarf separat. Dieser Fork erteilt dafür keine eigenen Nutzungs- oder Weitergaberechte.
+The [wiki](https://www.orcaslicer.com/wiki) aims to provide a detailed explanation of the slicer settings, including how to maximize their use and how to calibrate and set up your printer.
+
+- **[Access the wiki here](https://www.orcaslicer.com/wiki)**
+- **[Contribute to the wiki](https://www.orcaslicer.com/wiki/how_to_wiki)**
+
+# Download
+
+## Stable Release
+
+📥 **[Download the Latest Stable Release](https://github.com/OrcaSlicer/OrcaSlicer/releases/latest)**  
+Visit our GitHub Releases page for the latest stable version of OrcaSlicer, recommended for most users.  
+Windows release binaries are code signed; see our [Code signing policy](#code-signing-policy).
+
+## Nightly Builds
+
+🌙 **[Download the Latest Nightly Build](https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/nightly-builds)**  
+Explore the latest developments in OrcaSlicer with our nightly builds. Feedback on these versions is highly appreciated.
+
+# How to install
+
+## Windows
+
+Download the **Windows Installer exe** for your preferred version from the [releases page](https://github.com/OrcaSlicer/OrcaSlicer/releases). Both `x64` and `arm64` installers are published — pick the one matching your CPU.
+
+- *For convenience there is also a portable build available.*
+    <details>
+    <summary>Troubleshooting</summary>
+
+  - *If you have troubles to run the build, you might need to install following runtimes:*
+  - [MicrosoftEdgeWebView2RuntimeInstallerX64](https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v1.0.10-sf2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe)
+    - [Details of this runtime](https://aka.ms/webview2)
+    - [Alternative Download Link Hosted by Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703)
+  - [vcredist2019_x64](https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v1.0.10-sf2/vcredist2019_x64.exe)
+    - [Alternative Download Link Hosted by Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+    - This file may already be available on your computer if you've installed visual studio.  Check the following location: `%VCINSTALLDIR%Redist\MSVC\v142`
+    </details>
+
+### Microsoft Store
+
+Install from the [Microsoft Store](https://apps.microsoft.com/detail/9mv6gl23xm59) when you prefer a Store-signed package (helps on Windows 11 Smart App Control).
+
+### Windows Package Manager
+
+```shell
+winget install --id=SoftFever.OrcaSlicer -e
+```
+
+## Mac
+
+1. Download the universal DMG, which runs on both Apple Silicon and Intel Macs.
+2. Drag OrcaSlicer.app to Application folder.
+3. *If you want to run a build from a PR, you also need to follow the instructions below:*
+
+    <details>
+    <summary>Quarantine</summary>
+
+    - Option 1 (You only need to do this once. After that the app can be opened normally.):
+      - Step 1: Hold _cmd_ and right click the app, from the context menu choose **Open**.
+      - Step 2: A warning window will pop up, click _Open_
+
+    - Option 2:
+      Execute this command in terminal:
+
+      ```shell
+      xattr -dr com.apple.quarantine /Applications/OrcaSlicer.app
+      ```
+
+    - Option 3:
+        - Step 1: open the app, a warning window will pop up  
+            ![mac_cant_open](./SoftFever_doc/mac_cant_open.png)
+        - Step 2: in `System Settings` -> `Privacy & Security`, click `Open Anyway`:  
+            ![mac_security_setting](./SoftFever_doc/mac_security_setting.png)
+    </details>
+
+### Homebrew Cask
+
+```shell
+brew install --cask orcaslicer
+```
+
+The [Homebrew cask](https://formulae.brew.sh/cask/orcaslicer) installs the official macOS DMG from [GitHub Releases](https://github.com/OrcaSlicer/OrcaSlicer/releases).
+
+## Linux
+
+### Flathub (Recommended)
+
+OrcaSlicer is available through FlatHub:
+
+<a href='https://flathub.org/apps/com.orcaslicer.OrcaSlicer'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
+
+Install from the command line:
+
+```shell
+flatpak install flathub com.orcaslicer.OrcaSlicer
+flatpak run com.orcaslicer.OrcaSlicer
+```
+
+It can also be installed through graphical software managers (KDE Discover, GNOME Software, etc.) when Flathub is enabled. Search for **OrcaSlicer** in your software center.
+
+### AppImage
+
+AppImages are published for both **x86_64** and **aarch64** (ARM64). Pick the file matching your CPU — the ARM64 build has `aarch64` in its name (e.g. `OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_*.AppImage`).
+
+ 1. Download App image from the [releases page](https://github.com/OrcaSlicer/OrcaSlicer/releases).
+ 2. Double click the downloaded file to run it.
+
+ 3. If you run into trouble executing it, try this command in the terminal:
+    `chmod +x /path_to_appimage/OrcaSlicer_Linux.AppImage`
+
+# How to Compile
+
+All updated build instructions for Windows, macOS, and Linux are now available on the official [OrcaSlicer Wiki - How to build](https://www.orcaslicer.com/wiki/how_to_build) page.
+
+Please refer to the wiki to ensure you're following the latest and most accurate steps for your platform.
+
+# Klipper Note
+
+If you're running Klipper, it's recommended to add the following configuration to your `printer.cfg` file.
+
+```gcode
+# Enable object exclusion
+[exclude_object]
+
+# Enable arcs support
+[gcode_arcs]
+resolution: 0.1
+```
+
+# Supports
+
+**OrcaSlicer** is an open-source project, and we're deeply grateful to all our sponsors and backers.  
+Their generous support helps fund filaments and other essential 3D printing materials for the project.  
+Thank you! :)
+
+## Sponsors
+
+<table>
+<tr>
+<td>
+<a href="https://qidi3d.com/" style="display:inline-block; border-radius:8px; background:#fff;">
+  <img src="SoftFever_doc\sponsor_logos\QIDI.png" alt="QIDI" width="100" height="100">
+</a>
+</td>
+<td>
+<a href="https://bigtree-tech.com/" style="display:inline-block; border-radius:8px; background:#222;">
+    <img src="SoftFever_doc\sponsor_logos\BigTreeTech.png" alt="BIGTREE TECH" width="100" height="100">
+</a>
+</td>
+</tr>
+</table>
+
+## Backers:
+
+**Ko-fi supporters** ☕: [Backers list](https://github.com/user-attachments/files/16147016/Supporters_638561417699952499.csv)
+
+## Support the project
+
+<a href="https://github.com/sponsors/SoftFever"><img src="https://img.shields.io/badge/GitHub%20Sponsors-30363D?style=flat&logo=GitHub-Sponsors&logoColor=EA4AAA" height="50"></a>  
+<a href="https://ko-fi.com/G2G5IP3CP"><img src="https://img.shields.io/badge/Support_me_on_Ko--fi-FF5E5B?style=flat&logo=ko-fi&logoColor=white" height="50"></a>  
+<a href="https://paypal.me/softfever3d"><img src="https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=fff" height="50"></a>
+
+## Some Background
+
+Open-source slicing has always been built on a tradition of collaboration and attribution. [Slic3r](https://github.com/Slic3r/Slic3r), created by Alessandro Ranellucci and the RepRap community, laid the foundation. [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research built on Slic3r and acknowledged that heritage. [Bambu Studio](https://github.com/bambulab/BambuStudio) in turn forked from PrusaSlicer, and [SuperSlicer](https://github.com/supermerill/SuperSlicer) by @supermerill extended PrusaSlicer with community-driven enhancements. Each project carried the work of its predecessors forward, crediting those who came before.
+
+OrcaSlicer began in that same spirit, drawing from BambuStudio, PrusaSlicer, and ideas inspired by CuraSlicer and SuperSlicer. But it has since grown far beyond its origins. Through relentless innovation — introducing advanced calibration tools, precise wall and seam control, tree supports, adaptive slicing, and hundreds of other features — OrcaSlicer has become the most widely used and actively developed open-source slicer in the 3D printing community. Many of its innovations have been adopted by other slicers, making it a driving force for the entire industry.
+
+The OrcaSlicer logo was designed by community member [Justin Levine](https://github.com/jal-co).
+
+# Code Signing Policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+Windows release binaries are built by GitHub Actions from this repository and signed through the SignPath Foundation program. Every signing request is manually approved.
+
+**Team roles:** [SoftFever](https://github.com/SoftFever) is the committer, reviewer and approver for all signed releases.
+
+**Privacy policy:** See the [OrcaSlicer privacy policy](https://www.orcaslicer.com/privacy-policy/).
+
+# License
+
+- **OrcaSlicer** is licensed under the GNU Affero General Public License, version 3.
+- The **GNU Affero General Public License**, version 3 ensures that if you use any part of this software in any way (even behind a web server), your software must be released under the same license.
+- OrcaSlicer includes a **pressure advance calibration pattern test** adapted from Andrew Ellis' generator, which is licensed under GNU General Public License, version 3. Ellis' generator is itself adapted from a generator developed by Sineos for Marlin, which is licensed under GNU General Public License, version 3.
+- The **Bambu networking plugin** is based on non-free libraries from BambuLab. It is optional to the OrcaSlicer and provides extended functionalities for Bambulab printer users.

@@ -1,6 +1,17 @@
 #include "DownloadProgressDialog.hpp"
 
+#include "slic3r/GUI/GUI_Utils.hpp"
+#include <wx/event.h>
+#include <wx/gdicmn.h>
+#include <wx/chartype.h>
+#include <wx/panel.h>
+#include <memory>
+#include "slic3r/GUI/BBLStatusBarSend.hpp"
+#include "slic3r/GUI/Jobs/UpgradeNetworkJob.hpp"
+#include "slic3r/GUI/Jobs/Worker.hpp"
+#include <utility>
 #include <wx/settings.h>
+#include <wx/simplebook.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/button.h>
@@ -11,13 +22,11 @@
 #include <wx/html/htmlwin.h>
 
 #include <boost/algorithm/string/replace.hpp>
+#include <wx/string.h>
+#include <wx/toplevel.h>
 
-#include "libslic3r/libslic3r.h"
-#include "libslic3r/Utils.hpp"
-#include "GUI.hpp"
 #include "I18N.hpp"
 //#include "ConfigWizard.hpp"
-#include "wxExtensions.hpp"
 #include "slic3r/GUI/MainFrame.hpp"
 #include "slic3r/GUI/MsgDialog.hpp"
 #include "GUI_App.hpp"
@@ -25,8 +34,9 @@
 #include "Jobs/PlaterWorker.hpp"
 
 #include "Widgets/HyperLink.hpp" // ORCA
+#include "libslic3r/AppConfig.hpp"
 
-#define DESIGN_INPUT_SIZE wxSize(FromDIP(100), -1)
+class wxWindow;
 
 namespace Slic3r {
 namespace GUI {
@@ -112,9 +122,8 @@ DownloadProgressDialog::DownloadProgressDialog(wxString title)
     m_simplebook_status->AddPage(m_panel_download_failed, wxEmptyString, false);
     m_simplebook_status->AddPage(m_panel_install_failed, wxEmptyString, false);
 
-    SetSizer(m_sizer_main);
+    SetSizerAndFit(m_sizer_main);
     Layout();
-    Fit();
     CentreOnParent();
 
     Bind(wxEVT_CLOSE_WINDOW, &DownloadProgressDialog::on_close, this);
@@ -157,10 +166,6 @@ bool DownloadProgressDialog::Show(bool show)
                     this->Close();
                 }
             );
-            if (IsModal())
-                EndModal(wxID_OK);
-            else
-                Close();
         });
 
         //download failed
@@ -179,15 +184,6 @@ bool DownloadProgressDialog::Show(bool show)
         Bind(EVT_INSTALL_NETWORK_FAILED, [this](wxCommandEvent& evt) {
             m_status_bar->change_button_label(_L("Close"));
             m_status_bar->set_progress(0);
-#if defined(_WIN32)
-            if (!evt.GetString().empty()) {
-                wxString details = evt.GetString();
-                if (details.length() > 1600)
-                    details = details.Left(1600) + "\n...";
-                MessageDialog error_dialog(this, details, _L("Plug-in installation failed"), wxOK | wxICON_ERROR);
-                error_dialog.ShowModal();
-            }
-#endif
             this->m_simplebook_status->SetSelection(2);
             m_status_bar->set_cancel_callback_fina(
                 [this]() {

@@ -1,4 +1,9 @@
 #pragma once
+#include <wx/setup.h>
+#include <memory>
+#include <wx/string.h>
+#include <string>
+#include <wx/event.h>
 #ifndef slic3r_ZWebUserLogin_HEAD_
 #define slic3r_ZWebUserLogin_HEAD_
 
@@ -58,7 +63,7 @@ public:
     void OnScriptResponseMessage(wxCommandEvent &evt);
     void RunScript(const wxString &javascript);
 
-    bool m_networkOk { false };
+    bool m_networkOk;
     bool ShowErrorPage();
 
     bool run();
@@ -70,13 +75,10 @@ private:
 
 private:
     wxString   TargetUrl;
-    wxWebView *m_browser { nullptr };
+    wxWebView *m_browser;
 
     std::string m_AutotestToken;
     int m_loopback_port { 0 };
-    int m_linux_viewer_port { 0 };
-    bool m_linux_auth { false };
-    std::string m_linux_auth_error;
 
 #if wxUSE_WEBVIEW_IE
     wxMenuItem *m_script_object_el;

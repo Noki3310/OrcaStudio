@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../bambu_networking.hpp"
+#include "../../../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
 #include "../../GUI/Printer/BambuTunnel.h"
 #include "SlicerLinuxRuntimeCompat.hpp"
 

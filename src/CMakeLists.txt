@@ -33,7 +33,8 @@ if (SLIC3R_GUI)
         set (wxWidgets_CONFIG_OPTIONS "--toolkit=gtk${SLIC3R_GTK}")
         find_package(wxWidgets 3.3 REQUIRED COMPONENTS base core adv html gl aui net media webview)
     else ()
-        find_package(wxWidgets 3.3 CONFIG REQUIRED COMPONENTS html adv gl core base webview aui net media)
+        # propgrid is required by wxInspector.
+        find_package(wxWidgets 3.3 CONFIG REQUIRED COMPONENTS html adv gl core base webview aui net media propgrid)
     endif ()
 
     if(UNIX)
@@ -75,7 +76,7 @@ if (SLIC3R_GUI)
         list(FILTER wxWidgets_LIBRARIES EXCLUDE REGEX expat)
         list(APPEND wxWidgets_LIBRARIES ${EXPAT_LIBRARIES})
     endif ()
-    
+
     # This is an issue in the new wxWidgets cmake build, doesn't deal with librt
     find_library(LIBRT rt)
     if(LIBRT)
@@ -88,6 +89,26 @@ if (SLIC3R_GUI)
     list(FILTER wxWidgets_LIBRARIES EXCLUDE REGEX OpenGL)
 
 #    list(REMOVE_ITEM wxWidgets_LIBRARIES oleacc)
+
+    find_package(wxInspector REQUIRED)
+    # wxInspector 1.0.0 installs its headers but accidentally declares the
+    # INSTALL_INTERFACE include directory PRIVATE, so its imported target does
+    # not expose them to consumers. Restore the package prefix include path until
+    # the upstream export is fixed.
+    get_filename_component(WXINSPECTOR_PREFIX "${wxInspector_DIR}/../../.." ABSOLUTE)
+    target_include_directories(wxInspector::wxInspector INTERFACE "${WXINSPECTOR_PREFIX}/include")
+
+    # wxInspector's exported interface names the release wxWidgets import
+    # libraries, which a Debug build cannot link. wx is linked above instead.
+    get_target_property(_wxinspector_interface wxInspector::wxInspector INTERFACE_LINK_LIBRARIES)
+    if (_wxinspector_interface)
+        list(FILTER _wxinspector_interface EXCLUDE REGEX "wx(base|msw)3[0-9]u[_.]")
+        set_target_properties(wxInspector::wxInspector PROPERTIES
+            INTERFACE_LINK_LIBRARIES "${_wxinspector_interface}")
+    endif ()
+
+    list(APPEND wxWidgets_LIBRARIES "wxInspector::wxInspector")
+
     message(STATUS "wx libs: ${wxWidgets_LIBRARIES}")
 
     add_subdirectory(slic3r)
@@ -124,10 +145,6 @@ else ()
     add_executable(OrcaSlicer OrcaSlicer.cpp OrcaSlicer.hpp)
 endif ()
 
-if (APPLE)
-    set_target_properties(OrcaSlicer PROPERTIES OUTPUT_NAME "OrcaStudio")
-endif ()
-
 if (MINGW)
     target_link_options(OrcaSlicer PUBLIC "-Wl,-allow-multiple-definition")
     set_target_properties(OrcaSlicer PROPERTIES PREFIX "")
@@ -152,84 +169,12 @@ endif ()
 
 if (NOT WIN32 AND NOT APPLE)
     # Binary name on unix like systems (Linux, Unix)
-    set_target_properties(OrcaSlicer PROPERTIES OUTPUT_NAME "orca-studio")
-    set(SLIC3R_APP_CMD "orca-studio")
+    set_target_properties(OrcaSlicer PROPERTIES OUTPUT_NAME "orca-slicer")
+    set(SLIC3R_APP_CMD "orca-slicer")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/unix/build_linux_image.sh.in ${CMAKE_CURRENT_BINARY_DIR}/build_linux_image.sh USE_SOURCE_PERMISSIONS @ONLY)
 endif ()
 
 target_link_libraries(OrcaSlicer libslic3r cereal::cereal)
-set(SLICER_LINUX_RUNTIME_WINDOWS_RUNTIME_SUPPORT_FILES "")
-set(SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES "")
-if (WIN32)
-    foreach(_runtime_support_file
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/slicer_linux_runtime_wsl_distro.txt"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/install_runtime.ps1"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/install_runtime.cmd"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/verify_runtime.ps1"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/slicer_linux_runtime_wsl_run_host.sh"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/slicer_linux_runtime_component_dir.txt"
-        "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/release/assemble_windows_runtime_bundle.ps1")
-        if (EXISTS "${_runtime_support_file}")
-            file(TO_CMAKE_PATH "${_runtime_support_file}" _runtime_support_file_cmake)
-            list(APPEND SLICER_LINUX_RUNTIME_WINDOWS_RUNTIME_SUPPORT_FILES "${_runtime_support_file_cmake}")
-        endif()
-    endforeach()
-
-    if (DEFINED SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR AND NOT "${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR}" STREQUAL "")
-        if (NOT EXISTS "${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR}")
-            message(FATAL_ERROR "SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR does not exist: ${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR}")
-        endif()
-
-        file(GLOB SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR_GLOB LIST_DIRECTORIES false "${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR}/*")
-        if (NOT SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR_GLOB)
-            message(FATAL_ERROR "SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR is empty: ${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR}")
-        endif()
-
-        foreach(_runtime_file ${SLICER_LINUX_RUNTIME_WSL_RUNTIME_DIR_GLOB})
-            if (EXISTS "${_runtime_file}" AND NOT IS_DIRECTORY "${_runtime_file}")
-                get_filename_component(_runtime_file_name "${_runtime_file}" NAME)
-                if (NOT _runtime_file_name MATCHES "^(libbambu_networking[.]so|libBambuSource[.]so|liblive555[.]so|libagora_rtc_sdk[.]so|libagora-fdkaac[.]so|linux_component_manifest[.]json|network_plugins[.]json)$")
-                    file(TO_CMAKE_PATH "${_runtime_file}" _runtime_file_cmake)
-                    list(APPEND SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
-                endif()
-            endif()
-        endforeach()
-    else()
-        set(_default_linux_runtime_dir
-            "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime_host/runtime/linux-x86_64")
-        if (EXISTS "${_default_linux_runtime_dir}")
-            file(GLOB _default_linux_runtime_files LIST_DIRECTORIES false
-                "${_default_linux_runtime_dir}/*")
-            foreach(_runtime_file ${_default_linux_runtime_files})
-                get_filename_component(_runtime_file_name "${_runtime_file}" NAME)
-                if (NOT _runtime_file_name MATCHES "^(libbambu_networking[.]so|libBambuSource[.]so|liblive555[.]so|libagora_rtc_sdk[.]so|libagora-fdkaac[.]so|linux_component_manifest[.]json|network_plugins[.]json)$")
-                    file(TO_CMAKE_PATH "${_runtime_file}" _runtime_file_cmake)
-                    list(APPEND SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
-                endif()
-            endforeach()
-        endif()
-
-        foreach(_runtime_file
-            "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/rootfs/windows-wsl2-rootfs.tar"
-            "${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/windows-wsl2-rootfs.tar")
-            if (EXISTS "${_runtime_file}")
-                file(TO_CMAKE_PATH "${_runtime_file}" _runtime_file_cmake)
-                list(APPEND SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
-            endif()
-        endforeach()
-
-        foreach(_cert_candidate
-            "${CMAKE_SOURCE_DIR}/cert/ca-certificates.crt"
-            "${CMAKE_SOURCE_DIR}/resources/cert/ca-certificates.crt")
-            if (EXISTS "${_cert_candidate}")
-                file(TO_CMAKE_PATH "${_cert_candidate}" _runtime_file_cmake)
-                list(APPEND SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
-                break()
-            endif()
-        endforeach()
-
-    endif()
-endif()
 # target_include_directories(OrcaSlicer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/slic3r)
 if (APPLE)
 #    add_compile_options(-stdlib=libc++)
@@ -244,10 +189,9 @@ else ()
     target_link_libraries(OrcaSlicer ${CMAKE_DL_LIBS} -lstdc++ Threads::Threads pangoft2-1.0)
 endif ()
 
-# Add the Slic3r GUI library, libcurl, OpenGL and GLU libraries.
 if (SLIC3R_GUI)
 #    target_link_libraries(OrcaSlicer ws2_32 uxtheme setupapi libslic3r_gui ${wxWidgets_LIBRARIES})
-target_link_libraries(OrcaSlicer libslic3r_gui)
+target_link_libraries(OrcaSlicer libslic3r_gui wxInspector::wxInspector)
     if (MSVC)
         # Generate debug symbols even in release mode.
         target_link_options(OrcaSlicer PUBLIC "$<$<CONFIG:RELEASE>:/DEBUG>")
@@ -280,7 +224,7 @@ if (WIN32)
     target_compile_definitions(OrcaSlicer_app_gui PRIVATE "$<$<NOT:$<CONFIG:RelWithDebInfo>>:SLIC3R_WRAPPER_NOCONSOLE>")
     add_dependencies(OrcaSlicer_app_gui OrcaSlicer)
     set_target_properties(OrcaSlicer_app_gui PROPERTIES
-        OUTPUT_NAME "OrcaStudio"
+        OUTPUT_NAME "orca-slicer"
         WIN32_EXECUTABLE "$<NOT:$<CONFIG:RelWithDebInfo>>"
     )
     target_link_libraries(OrcaSlicer_app_gui PRIVATE boost_headeronly)
@@ -328,14 +272,6 @@ if (WIN32)
                 VERBATIM
             )
         endforeach ()
-
-        if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-            orcaslicer_copy_dlls(COPY_DLLS "Debug" "d" output_dlls_Debug)
-        elseif("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
-            orcaslicer_copy_dlls(COPY_DLLS "RelWithDebInfo" "" output_dlls_Release)
-        else()
-            orcaslicer_copy_dlls(COPY_DLLS "Release" "" output_dlls_Release)
-        endif()
     else ()
         file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/resources" WIN_RESOURCES_SYMLINK)
         add_custom_command(TARGET OrcaSlicer POST_BUILD
@@ -351,9 +287,30 @@ if (WIN32)
         COMMENT "Copying Python runtime into the build tree"
         VERBATIM)
 
+    if (CMAKE_CONFIGURATION_TYPES)
+        # Multi-config generators (Visual Studio, Ninja Multi-Config): copy per config.
+        foreach (cfg ${CMAKE_CONFIGURATION_TYPES})
+            if ("${cfg}" STREQUAL "Debug")
+                orcaslicer_copy_dlls(COPY_DLLS "Debug" "d" output_dlls_Debug)
+            elseif("${cfg}" STREQUAL "RelWithDebInfo")
+                orcaslicer_copy_dlls(COPY_DLLS "RelWithDebInfo" "" output_dlls_RelWithDebInfo)
+            else()
+                orcaslicer_copy_dlls(COPY_DLLS "${cfg}" "" output_dlls_${cfg})
+            endif()
+        endforeach()
+    else()
+        # Single-config generators (Ninja): use CMAKE_BUILD_TYPE.
+        if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+            orcaslicer_copy_dlls(COPY_DLLS "Debug" "d" output_dlls_Debug)
+        elseif("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
+            orcaslicer_copy_dlls(COPY_DLLS "RelWithDebInfo" "" output_dlls_RelWithDebInfo)
+        else()
+            orcaslicer_copy_dlls(COPY_DLLS "Release" "" output_dlls_Release)
+        endif()
+    endif()
 
 else ()
-    if (NOT APPLE AND NOT FLATPAK)
+    if (NOT APPLE)
         set(output_sos_Release "")
         set(output_sos_Debug "")
         add_custom_target(OrcaSlicerSosCopy ALL DEPENDS OrcaSlicer)
@@ -361,15 +318,12 @@ else ()
             orcaslicer_copy_sos(OrcaSlicerSosCopy "Debug" "d" output_sos_Debug)
         else()
             orcaslicer_copy_sos(OrcaSlicerSosCopy "Release" "" output_sos_Release)
-            set(output_sos_RelWithDebInfo ${output_sos_Release})
         endif()
     endif()
     if (APPLE AND NOT CMAKE_MACOSX_BUNDLE)
         # On OSX, the name of the binary matches the name of the Application.
         add_custom_command(TARGET OrcaSlicer POST_BUILD
-            COMMAND ln -sf OrcaStudio orca-studio
-            COMMAND ln -sf OrcaStudio bambu-studio
-            COMMAND ln -sf OrcaStudio orca-slicer
+            COMMAND ln -sf OrcaSlicer orca-slicer
             WORKING_DIRECTORY "$<TARGET_FILE_DIR:OrcaSlicer>"
             VERBATIM)
     endif ()
@@ -384,14 +338,14 @@ else ()
     endif ()
     if (CMAKE_MACOSX_BUNDLE)
         if (CMAKE_CONFIGURATION_TYPES)
-            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/OrcaStudio.app/Contents/Resources")
-            set(BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/OrcaStudio.app/Contents/MacOS")
+            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/OrcaSlicer.app/Contents/Resources")
+            set(BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/OrcaSlicer.app/Contents/MacOS")
         else()
-            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/OrcaStudio.app/Contents/Resources")
-            set(BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/OrcaStudio.app/Contents/MacOS")
+            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/OrcaSlicer.app/Contents/Resources")
+            set(BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/OrcaSlicer.app/Contents/MacOS")
         endif()
         set(MACOSX_BUNDLE_ICON_FILE Icon.icns)
-        set(MACOSX_BUNDLE_BUNDLE_NAME "OrcaStudio")
+        set(MACOSX_BUNDLE_BUNDLE_NAME "OrcaSlicer")
         set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${SoftFever_VERSION})
         set(MACOSX_BUNDLE_COPYRIGHT "Copyright(C) 2022-2024 Li Jiang All Rights Reserved")
         if (XCODE)
@@ -441,15 +395,6 @@ if (WIN32)
     if (MSVC)
         install(TARGETS OrcaSlicer_app_gui RUNTIME DESTINATION ".")
     endif ()
-    if (TARGET slicer_linux_runtime)
-        install(TARGETS slicer_linux_runtime RUNTIME DESTINATION ".")
-    endif ()
-    if (SLICER_LINUX_RUNTIME_WINDOWS_RUNTIME_SUPPORT_FILES)
-        install(FILES ${SLICER_LINUX_RUNTIME_WINDOWS_RUNTIME_SUPPORT_FILES} DESTINATION ".")
-    endif()
-    if (SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES)
-        install(FILES ${SLICER_LINUX_RUNTIME_OPTIONAL_WINDOWS_RUNTIME_FILES} DESTINATION ".")
-    endif()
     install(FILES ${output_dlls_${build_type}} DESTINATION ".")
     install(DIRECTORY "${CMAKE_PREFIX_PATH}/libpython/" DESTINATION "python")
 else ()

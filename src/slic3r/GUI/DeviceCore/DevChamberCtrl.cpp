@@ -1,9 +1,13 @@
 #include "DevChamber.h"
+#include <nlohmann/json.hpp>
 #include "slic3r/GUI/DeviceManager.hpp"
+#include <string>
+
+using json = nlohmann::json;
 
 namespace Slic3r {
 
-int DevChamber::CtrlSetChamberTemp(int temp)
+int DevChamber::CtrlSetChamberTemp(int temp) 
 {
     json j;
     j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);

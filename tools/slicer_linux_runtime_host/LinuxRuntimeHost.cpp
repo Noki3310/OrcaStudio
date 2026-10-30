@@ -2,7 +2,7 @@
 
 #include "../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
 #include "../../shared/slicer_linux_runtime_core/RuntimeAuthPayload.hpp"
-#include "../../src/slic3r/Utils/bambu_networking.hpp"
+#include "../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
 #include "../../src/slic3r/GUI/Printer/BambuTunnel.h"
 #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeCompat.hpp"
 #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeConfig.hpp"
@@ -1038,6 +1038,7 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.task_ext_change_assist = j.value("task_ext_change_assist", false);
     p.try_emmc_print = j.value("try_emmc_print", false);
     p.svc_context = j.value("svc_context", std::string());
+    p.slicer_uid = j.value("slicer_uid", std::string());
     translate_print_params_paths(p);
     return p;
 }
