@@ -30,7 +30,7 @@ jobs:
           git checkout -b "$target" 3634a55f22f0fcf856839010f0d1db3940afa295
           git read-tree --reset -u "$alpha"
           # Import application sources only; preserve existing workflow permissions.
-          git rm -r .github/workflows
+          git rm -r -f .github/workflows
           git checkout 3634a55f22f0fcf856839010f0d1db3940afa295 -- .github/workflows
           git checkout 3634a55f22f0fcf856839010f0d1db3940afa295 -- shared/slicer_linux_runtime_core src/slic3r/Utils/SlicerLinuxRuntime tools/slicer_linux_runtime tools/slicer_linux_runtime_host tools/slicer_linux_auth_helper
           git show 3634a55f22f0fcf856839010f0d1db3940afa295:src/slic3r/Utils/bambu_networking.hpp > shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp
