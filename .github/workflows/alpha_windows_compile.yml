@@ -1,0 +1,37 @@
+name: Alpha Windows compilation
+on:
+  push:
+    branches: [build/alpha-integration-bootstrap]
+    paths: [.github/workflows/alpha_windows_compile.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 79fade557eca6c07ca214e7d134c01f4fadd97a5
+          lfs: false
+      - uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.3.0"
+      - uses: microsoft/setup-msbuild@v3
+      - uses: actions/cache@v4
+        with:
+          path: deps/build
+          key: alpha-msvc-x64-release-${{ runner.imageversion }}-${{ hashFiles('deps/**', 'cmake/**') }}
+      - name: Compile full Alpha application with X1C controls
+        shell: cmd
+        run: build_win.bat --deps --slicer --config release --arch x64 --jobs 2
+      - name: Preserve configure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-windows-build-logs
+          path: |
+            build/**/CMakeConfigureLog.yaml
+            deps/build/**/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
