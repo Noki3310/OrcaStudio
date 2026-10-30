@@ -868,6 +868,10 @@ endif ()
 add_subdirectory(GUI/DeviceCore)
 add_subdirectory(GUI/DeviceTab)
 
+if (ORCA_BUILD_LINUX_RUNTIME)
+    add_subdirectory(Utils/SlicerLinuxRuntime)
+endif ()
+
 if (WIN32)
     list(APPEND SLIC3R_GUI_SOURCES
             GUI/dark_mode/dark_mode.hpp
