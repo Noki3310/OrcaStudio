@@ -1,0 +1,27 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a302bb15..b20cd445 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -120,6 +120,7 @@ option(SLIC3R_MSVC_COMPILE_PARALLEL "Compile on Visual Studio in parallel" 1)
+ option(SLIC3R_MSVC_PDB          "Generate PDB files on MSVC in Release mode" 1)
+ option(SLIC3R_RELATIVE_DEBUG_PATHS "Record a relative compilation directory in debug info (clang-cl)" 0)
+ option(SLIC3R_ASAN              "Enable ASan on Clang and GCC" 0)
++option(ORCA_BUILD_LINUX_RUNTIME "Build the isolated OrcaStudio Linux runtime bridge" ${WIN32})
+ 
+ # Python stubgen module
+ option(ORCA_BUILD_PYTHON_STUBGEN_MODULE "Build importable Python module for pybind11-stubgen" ON)
+diff --git a/src/slic3r/CMakeLists.txt b/src/slic3r/CMakeLists.txt
+index 367aadaa..42d2308a 100644
+--- a/src/slic3r/CMakeLists.txt
++++ b/src/slic3r/CMakeLists.txt
+@@ -868,6 +868,10 @@ endif ()
+ add_subdirectory(GUI/DeviceCore)
+ add_subdirectory(GUI/DeviceTab)
+ 
++if (ORCA_BUILD_LINUX_RUNTIME)
++    add_subdirectory(Utils/SlicerLinuxRuntime)
++endif ()
++
+ if (WIN32)
+     list(APPEND SLIC3R_GUI_SOURCES
+             GUI/dark_mode/dark_mode.hpp
