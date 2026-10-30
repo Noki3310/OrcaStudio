@@ -1,0 +1,76 @@
+diff --git a/shared/slicer_linux_runtime_core/RuntimeTunnel.hpp b/shared/slicer_linux_runtime_core/RuntimeTunnel.hpp
+new file mode 100644
+index 00000000..1addb61f
+--- /dev/null
++++ b/shared/slicer_linux_runtime_core/RuntimeTunnel.hpp
+@@ -0,0 +1,31 @@
++#pragma once
++
++#include "../../src/slic3r/GUI/Printer/BambuTunnel.h"
++
++// Optional camera callbacks exposed by the OrcaStudio Linux component.
++// Keep these additions private to the runtime rather than changing Alpha's
++// BambuLib function table, whose layout belongs to its native camera loader.
++extern "C" {
++typedef struct __PlayerEventC {
++    const char* event_name;
++    const char* module;
++    const char* phase;
++    const char* result;
++    const char* error_code;
++    const char* error_message;
++    const char* event_data_body;
++} PlayerEventC;
++
++typedef void (*TrackReporter)(void* context, const PlayerEventC* event);
++typedef void (*StreamInfoCallback)(void* context, Bambu_StreamInfo* info);
++
++typedef struct __Bambu_SessionStat {
++    long long session_duration_ms;
++    long long freeze_total_duration_ms;
++    int freeze_count;
++    float avg_fps;
++    float avg_bitrate_kbps;
++    float avg_jitter_ms;
++    float max_jitter_ms;
++} Bambu_SessionStat;
++}
+diff --git a/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderExports.cpp b/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderExports.cpp
+index af55c33d..bb14801e 100644
+--- a/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderExports.cpp
++++ b/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderExports.cpp
+@@ -7,7 +7,7 @@
+ #include "../../../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
+ #include "libslic3r_version.h"
+ 
+-#include "../../GUI/Printer/BambuTunnel.h"
++#include "../../../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
+ #include "../FileTransferUtils.hpp"
+ 
+ #include <atomic>
+diff --git a/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderState.hpp b/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderState.hpp
+index 77d7ce03..40a99a8c 100644
+--- a/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderState.hpp
++++ b/src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeForwarderState.hpp
+@@ -1,7 +1,7 @@
+ #pragma once
+ 
+ #include "../../../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
+-#include "../../GUI/Printer/BambuTunnel.h"
++#include "../../../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
+ #include "SlicerLinuxRuntimeCompat.hpp"
+ 
+ #include <cstdint>
+diff --git a/tools/slicer_linux_runtime_host/LinuxRuntimeHost.cpp b/tools/slicer_linux_runtime_host/LinuxRuntimeHost.cpp
+index b6faa6b0..f815df55 100644
+--- a/tools/slicer_linux_runtime_host/LinuxRuntimeHost.cpp
++++ b/tools/slicer_linux_runtime_host/LinuxRuntimeHost.cpp
+@@ -3,7 +3,7 @@
+ #include "../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
+ #include "../../shared/slicer_linux_runtime_core/RuntimeAuthPayload.hpp"
+ #include "../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
+-#include "../../src/slic3r/GUI/Printer/BambuTunnel.h"
++#include "../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
+ #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeCompat.hpp"
+ #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeConfig.hpp"
+ 
