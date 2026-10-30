@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
-#include "../../GUI/Printer/BambuTunnel.h"
+#include "../../../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
 #include "SlicerLinuxRuntimeCompat.hpp"
 
 #include <cstdint>

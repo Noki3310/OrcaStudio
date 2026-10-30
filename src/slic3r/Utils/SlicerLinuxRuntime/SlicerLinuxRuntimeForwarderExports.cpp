@@ -7,7 +7,7 @@
 #include "../../../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
 #include "libslic3r_version.h"
 
-#include "../../GUI/Printer/BambuTunnel.h"
+#include "../../../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
 #include "../FileTransferUtils.hpp"
 
 #include <atomic>

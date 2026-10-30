@@ -3,7 +3,7 @@
 #include "../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
 #include "../../shared/slicer_linux_runtime_core/RuntimeAuthPayload.hpp"
 #include "../../shared/slicer_linux_runtime_core/RuntimeLegacyNetworking.hpp"
-#include "../../src/slic3r/GUI/Printer/BambuTunnel.h"
+#include "../../shared/slicer_linux_runtime_core/RuntimeTunnel.hpp"
 #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeCompat.hpp"
 #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeConfig.hpp"
 
