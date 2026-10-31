@@ -413,6 +413,7 @@ enum class NetworkAbi {
     Unsupported, // no generation in this build can call it - never dispatch through it
     Legacy,      // 01.10.01: PrintParams_Legacy; send_message/send_message_to_printer take no flag
     V0203,       // 02.03.00: PrintParams_0203; bind takes no dev_model
+    Runtime020801, // isolated OrcaStudio forwarder, identified by its own ABI export
     Current,     // 02.08.04: the layouts and signatures this build declares directly
 };
 
