@@ -312,6 +312,10 @@ public:
     func_linux_auth_cancel get_linux_auth_cancel() const { return m_linux_auth_cancel; }
     func_linux_auth_capabilities get_linux_auth_capabilities() const { return m_linux_auth_capabilities; }
 
+    // Keep authentication calls and their agent alive across a module reload.
+    std::unique_lock<std::recursive_mutex> lock_auth_module() const
+    { return std::unique_lock<std::recursive_mutex>(m_auth_module_mutex); }
+
     NetworkAbi network_abi() const { return m_network_abi; }
     bool use_legacy_network() const { return m_network_abi == NetworkAbi::Legacy; }
 
@@ -469,6 +473,7 @@ private:
     func_linux_auth_cancel m_linux_auth_cancel{nullptr};
     func_linux_auth_capabilities m_linux_auth_capabilities{nullptr};
 
+    mutable std::recursive_mutex m_auth_module_mutex;
     NetworkAbi m_network_abi{NetworkAbi::Unsupported};
 
     // Function pointers
