@@ -5,7 +5,7 @@ on:
     paths: [.github/workflows/prepare_alpha.yml]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   prepare-and-build:
     runs-on: ubuntu-24.04
@@ -13,20 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Restore full upstream Alpha and isolated runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp tools/alpha-integration/runtime-cmake.patch /tmp/runtime-cmake.patch
-          git fetch origin integrate/alpha-full-base
-          git checkout -b runtime-build FETCH_HEAD
-          git apply --index /tmp/runtime-cmake.patch
-          git diff --cached --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Build isolated Windows bridge alongside the Alpha application"
-          git push origin HEAD:refs/heads/integrate/alpha-full-base
+          ref: 2d0ade5cd040b3cbfc665298dd645522115b236c
       - name: Install runtime build dependencies
         run: |
           sudo apt-get update
@@ -36,6 +23,7 @@ jobs:
           python3 tools/slicer_linux_runtime/test_http_request.py
           python3 tools/slicer_linux_runtime/test_runtime_dispatcher.py
           python3 tools/slicer_linux_runtime/test_print_params.py
+          python3 tools/slicer_linux_runtime/test_runtime_abi.py
           python3 tools/slicer_linux_runtime/test_drying_controls.py
           python3 tools/slicer_linux_runtime/test_drying_status.py
           python3 tools/slicer_linux_runtime/test_nozzle_settings.py
