@@ -106,6 +106,10 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
         return -1;
     }
 
+    // Explicit integration-test selection until runtime download/auth packaging is complete.
+    const char* runtime_setting = ::getenv("ORCASTUDIO_USE_LINUX_RUNTIME");
+    const bool use_runtime = runtime_setting && std::strcmp(runtime_setting, "1") == 0;
+
     // Auto-migration: If loading legacy version and versioned library doesn't exist,
     // but unversioned legacy library does exist, copy it to versioned format
     if (is_legacy_version(version)) {
@@ -143,12 +147,21 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
     library = using_backup ? (plugin_folder / versioned_name).string()
                            : resolve_library_path(version);
 
+    if (use_runtime) {
+        library = get_libpath_in_current_directory("slicer_linux_runtime");
+        if (library.empty()) {
+            set_load_error(_u8L("Network library not found"),
+                           "OrcaStudio runtime library is missing from the application directory", "");
+            return -1;
+        }
+    }
+
 #if defined(_MSC_VER) || defined(_WIN32)
     wchar_t lib_wstr[256];
     memset(lib_wstr, 0, sizeof(lib_wstr));
     ::MultiByteToWideChar(CP_UTF8, NULL, library.c_str(), strlen(library.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
     m_networking_module = LoadLibrary(lib_wstr);
-    if (!m_networking_module) {
+    if (!m_networking_module && !use_runtime) {
         std::string library_path = get_libpath_in_current_directory(std::string(BAMBU_NETWORK_LIBRARY));
         if (library_path.empty()) {
             set_load_error(
@@ -203,6 +216,13 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
         m_network_abi = runtime_abi() == 20801 ? NetworkAbi::Runtime020801 : NetworkAbi::Unsupported;
     }
 
+
+    if (use_runtime && m_network_abi != NetworkAbi::Runtime020801) {
+        unload();
+        set_load_error(_u8L("Failed to load network library"),
+                       "Selected runtime does not expose the required OrcaStudio ABI", library);
+        return -1;
+    }
 
     // A library reporting a series this build has no ABI for stays loaded but uncallable -
     // check_networking_version() then reports it as incompatible and offers the update flow.
