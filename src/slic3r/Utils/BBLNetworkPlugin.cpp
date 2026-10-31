@@ -86,6 +86,7 @@ BBLNetworkPlugin::~BBLNetworkPlugin()
 
 int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
 {
+    auto auth_lock = lock_auth_module();
     clear_load_error();
 
     std::string library;
@@ -238,6 +239,7 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
 
 int BBLNetworkPlugin::unload()
 {
+    auto auth_lock = lock_auth_module();
     // Orca: destroy the plugin agent while its creating DLL is still loaded, so the void* handle
     // never dangles into freed memory. A stale m_agent surviving the unload makes create_agent()
     // short-circuit on has_agent() after a hot reload, and the next call into the freshly loaded
@@ -308,6 +310,7 @@ std::string BBLNetworkPlugin::get_version() const
 
 void* BBLNetworkPlugin::create_agent(const std::string& log_dir)
 {
+    auto auth_lock = lock_auth_module();
     if (m_agent) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": reusing existing agent " << m_agent;
         return m_agent;
@@ -323,6 +326,7 @@ void* BBLNetworkPlugin::create_agent(const std::string& log_dir)
 
 int BBLNetworkPlugin::destroy_agent()
 {
+    auto auth_lock = lock_auth_module();
     int ret = 0;
     if (m_agent && m_destroy_agent) {
         ret = m_destroy_agent(m_agent);
