@@ -38,6 +38,7 @@ namespace {
 // The label is the whitelist row's series, so it can never drift from the dispatch table.
 const char* network_abi_name(NetworkAbi abi)
 {
+    if (abi == NetworkAbi::Runtime020801) return "OrcaStudio runtime 02.08.01";
     for (size_t i = 0; i < AVAILABLE_NETWORK_VERSIONS_COUNT; ++i)
         if (AVAILABLE_NETWORK_VERSIONS[i].abi == abi)
             return AVAILABLE_NETWORK_VERSIONS[i].version;
@@ -196,6 +197,12 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
     // via get_version(), which would substitute the "00.00.00.00" sentinel and pick no generation.
     const std::string loaded_version = m_get_version ? m_get_version() : std::string();
     m_network_abi = network_plugin_abi(loaded_version.empty() ? version : loaded_version);
+    // Never infer the forwarder's by-value ABI from the Linux backend version.
+    using RuntimeAbiFn = int (*)();
+    if (auto runtime_abi = reinterpret_cast<RuntimeAbiFn>(get_function("orca_runtime_network_abi"))) {
+        m_network_abi = runtime_abi() == 20801 ? NetworkAbi::Runtime020801 : NetworkAbi::Unsupported;
+    }
+
 
     // A library reporting a series this build has no ABI for stays loaded but uncallable -
     // check_networking_version() then reports it as incompatible and offers the update flow.
