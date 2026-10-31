@@ -16,6 +16,7 @@
 #include "WebViewDialog.hpp"
 #include "slic3r/Utils/BBLCloudServiceAgent.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
+#include "slic3r/Utils/NetworkPluginManifest.hpp"
 #include "GUI_Init.hpp"
 #include "GUI_ObjectList.hpp"
 #include "slic3r/GUI/UserManager.hpp"
@@ -1422,6 +1423,9 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
 
     // get_url
     std::string  url = get_plugin_url(name, app_config->get_country_code());
+    const auto version_position = url.rfind("cloud=");
+    const std::string requested_version = version_position == std::string::npos
+        ? std::string() : url.substr(version_position + 6);
     std::string download_url;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
@@ -1429,49 +1433,13 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
         .on_complete(
-        [&download_url](std::string body, unsigned status) {
-            try {
-                json j = json::parse(body);
-                std::string message = j["message"].get<std::string>();
-
-                if (message == "success") {
-                    json resource = j.at("resources");
-                    if (resource.is_array()) {
-                        for (auto iter = resource.begin(); iter != resource.end(); iter++) {
-                            Semver version;
-                            std::string version_str;
-                            std::string url;
-                            std::string type;
-                            std::string vendor;
-                            std::string description;
-                            for (auto sub_iter = iter.value().begin(); sub_iter != iter.value().end(); sub_iter++) {
-                                if (boost::iequals(sub_iter.key(), "type")) {
-                                    type = sub_iter.value();
-                                    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: get version of settings's type, " << sub_iter.value();
-                                }
-                                else if (boost::iequals(sub_iter.key(), "version")) {
-                                    version_str = sub_iter.value();
-                                    version = *(Semver::parse(version_str));
-                                }
-                                else if (boost::iequals(sub_iter.key(), "description")) {
-                                    description = sub_iter.value();
-                                }
-                                else if (boost::iequals(sub_iter.key(), "url")) {
-                                    url = sub_iter.value();
-                                }
-                            }
-                            BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get type " << type << ", version " << version.to_string() << ", url " << url;
-                            download_url = url;
-                        }
-                    }
-                }
-                else {
-                    BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get version of plugin failed, body=" << body;
-                }
-            }
-            catch (...) {
-                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1]: catch unknown exception";
-                ;
+        [&download_url, &requested_version](std::string body, unsigned status) {
+            const auto resource = select_network_plugin_resource(body, requested_version);
+            if (resource) {
+                download_url = resource->url;
+                BOOST_LOG_TRIVIAL(info) << "[download_plugin]: selected version " << resource->version;
+            } else {
+                BOOST_LOG_TRIVIAL(error) << "[download_plugin]: no valid resource for " << requested_version;
             }
         }).on_error(
             [&result, &err_msg](std::string body, std::string error, unsigned int status) {
