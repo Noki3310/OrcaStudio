@@ -249,3 +249,21 @@ if (WIN32)
         DESTINATION "."
     )
 endif()
+
+# Prepared and verified by the Linux packaging job. A supplied payload must be
+# complete; never silently produce an installer containing only the Windows DLL.
+set(ORCASTUDIO_RUNTIME_PAYLOAD_DIR "" CACHE PATH "Verified Linux runtime and WSL rootfs payload")
+if (WIN32 AND ORCASTUDIO_RUNTIME_PAYLOAD_DIR)
+    foreach(required_file IN ITEMS
+            slicer_linux_runtime_host slicer_linux_runtime_host_abi0
+            slicer_linux_runtime_host_abi1 slicer_linux_auth_browser
+            run_auth_browser.sh ca-certificates.crt slicer_base64.cer
+            runtime-files.sha256 windows-wsl2-rootfs.tar)
+        if (NOT EXISTS "${ORCASTUDIO_RUNTIME_PAYLOAD_DIR}/${required_file}")
+            message(FATAL_ERROR "Incomplete OrcaStudio runtime payload: ${required_file}")
+        endif()
+    endforeach()
+    install(DIRECTORY "${ORCASTUDIO_RUNTIME_PAYLOAD_DIR}/"
+        DESTINATION "."
+        PATTERN ".*" EXCLUDE)
+endif()
