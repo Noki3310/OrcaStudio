@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 79fade557eca6c07ca214e7d134c01f4fadd97a5
+          ref: a0822f27d8974f4b5095c70d42b8be2f529e37cb
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -22,10 +22,19 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: deps/build
-          key: alpha-msvc-x64-release-${{ runner.imageversion }}-${{ hashFiles('deps/**', 'cmake/**') }}
+          key: alpha-msvc-x64-release-${{ runner.imageversion }}-${{ hashFiles('deps/**', '!deps/build/**', 'cmake/**') }}
       - name: Compile full Alpha application with X1C controls
         shell: cmd
         run: build_win.bat --deps --slicer --config release --arch x64 --jobs 2
+      - name: Preserve compiled application for integration testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-windows-integration-test-only
+          path: |
+            build/src/Release/*.exe
+            build/src/Release/*.dll
+            build/src/Release/python/**
+          if-no-files-found: error
       - name: Preserve configure logs
         if: failure()
         uses: actions/upload-artifact@v4
