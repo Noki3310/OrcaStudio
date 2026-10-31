@@ -3,6 +3,7 @@
 
 #include <mutex>
 #include <boost/filesystem/path.hpp>
+#include <boost/nowide/convert.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <exception>
 #include <boost/filesystem/file_status.hpp>
@@ -157,24 +158,17 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
     }
 
 #if defined(_MSC_VER) || defined(_WIN32)
-    wchar_t lib_wstr[256];
-    memset(lib_wstr, 0, sizeof(lib_wstr));
-    ::MultiByteToWideChar(CP_UTF8, NULL, library.c_str(), strlen(library.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
-    m_networking_module = LoadLibrary(lib_wstr);
+    m_networking_module = LoadLibraryW(boost::nowide::widen(library).c_str());
     if (!m_networking_module && !use_runtime) {
-        std::string library_path = get_libpath_in_current_directory(std::string(BAMBU_NETWORK_LIBRARY));
+        const std::string library_path = get_libpath_in_current_directory(std::string(BAMBU_NETWORK_LIBRARY));
         if (library_path.empty()) {
-            set_load_error(
-                _u8L("Network library not found"),
-                "Could not locate versioned library: " + library,
-                library
-            );
+            set_load_error(_u8L("Network library not found"),
+                           "Could not locate versioned library: " + library, library);
             return -1;
         }
-        memset(lib_wstr, 0, sizeof(lib_wstr));
-        ::MultiByteToWideChar(CP_UTF8, NULL, library_path.c_str(), strlen(library_path.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
-        m_networking_module = LoadLibrary(lib_wstr);
+        m_networking_module = LoadLibraryW(boost::nowide::widen(library_path).c_str());
     }
+
 #else
     m_networking_module = dlopen(library.c_str(), RTLD_LAZY);
     if (!m_networking_module) {
@@ -407,20 +401,17 @@ std::string BBLNetworkPlugin::get_libpath_in_current_directory(const std::string
 {
     std::string lib_path;
 #if defined(_MSC_VER) || defined(_WIN32)
-    wchar_t file_name[512];
-    DWORD ret = GetModuleFileNameW(NULL, file_name, 512);
-    if (!ret) {
-        return lib_path;
-    }
-    int size_needed = ::WideCharToMultiByte(0, 0, file_name, wcslen(file_name), nullptr, 0, nullptr, nullptr);
-    std::string file_name_string(size_needed, 0);
-    ::WideCharToMultiByte(0, 0, file_name, wcslen(file_name), file_name_string.data(), size_needed, nullptr, nullptr);
+    // Resolve by directory, independent of the executable's branding. Preserve
+    // Unicode paths and reject truncation rather than loading a different file.
+    std::vector<wchar_t> file_name(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, file_name.data(),
+                                           static_cast<DWORD>(file_name.size()));
+    if (length == 0 || length >= file_name.size())
+        return {};
+    const auto directory = boost::filesystem::path(std::wstring(file_name.data(), length)).parent_path();
+    const auto path = directory / boost::filesystem::path(boost::nowide::widen(library_name + ".dll"));
+    lib_path = boost::nowide::narrow(path.wstring());
 
-    std::size_t found = file_name_string.find("orca-slicer.exe");
-    if (found == (file_name_string.size() - 16)) {
-        lib_path = library_name + ".dll";
-        lib_path = file_name_string.replace(found, 16, lib_path);
-    }
 #else
     (void)library_name;
 #endif
