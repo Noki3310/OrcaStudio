@@ -672,6 +672,11 @@ PrintParams_0203 BBLNetworkPlugin::as_0203(PrintParams& param)
 
 void BBLNetworkPlugin::load_all_function_pointers()
 {
+    m_linux_auth_start = reinterpret_cast<func_linux_auth_start>(get_function("slicer_linux_runtime_auth_start"));
+    m_linux_auth_start_v2 = reinterpret_cast<func_linux_auth_start_v2>(get_function("slicer_linux_runtime_auth_start_v2"));
+    m_linux_auth_status = reinterpret_cast<func_linux_auth_status>(get_function("slicer_linux_runtime_auth_status"));
+    m_linux_auth_cancel = reinterpret_cast<func_linux_auth_cancel>(get_function("slicer_linux_runtime_auth_cancel"));
+    m_linux_auth_capabilities = reinterpret_cast<func_linux_auth_capabilities>(get_function("slicer_linux_runtime_auth_capabilities"));
     m_check_debug_consistent = reinterpret_cast<func_check_debug_consistent>(get_function("bambu_network_check_debug_consistent"));
     m_get_version = reinterpret_cast<func_get_version>(get_function("bambu_network_get_version"));
     m_create_agent = reinterpret_cast<func_create_agent>(get_function("bambu_network_create_agent"));
@@ -841,6 +846,11 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_get_bambulab_host = nullptr;
     m_get_user_selected_machine = nullptr;
     m_set_user_selected_machine = nullptr;
+    m_linux_auth_start = nullptr;
+    m_linux_auth_start_v2 = nullptr;
+    m_linux_auth_status = nullptr;
+    m_linux_auth_cancel = nullptr;
+    m_linux_auth_capabilities = nullptr;
     m_start_print = nullptr;
     m_start_local_print_with_record = nullptr;
     m_start_send_gcode_to_sdcard = nullptr;
