@@ -137,6 +137,12 @@ typedef int (*func_start_send_gcode_to_sdcard_0203)(void *agent, PrintParams_020
 typedef int (*func_start_local_print_0203)(void *agent, PrintParams_0203 params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn);
 typedef int (*func_start_sdcard_print_0203)(void* agent, PrintParams_0203 params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn);
 
+typedef std::string (*func_linux_auth_start)(void* agent, std::string login_url);
+typedef std::string (*func_linux_auth_start_v2)(void* agent, std::string login_url, std::string client_version, std::string language, bool dark_mode);
+typedef std::string (*func_linux_auth_status)(void* agent);
+typedef int (*func_linux_auth_cancel)(void* agent);
+typedef std::string (*func_linux_auth_capabilities)();
+
 // bind() gained dev_model in 02.08.01; the legacy and 02.03.00 series share the older form.
 typedef int (*func_bind_pre0208)(void *agent, std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
 
@@ -300,6 +306,12 @@ public:
 
     static bool is_legacy_version(const std::string& version) { return version == BAMBU_NETWORK_AGENT_VERSION_LEGACY; }
     // The generation the loaded library speaks - what every call must dispatch on.
+    func_linux_auth_start get_linux_auth_start() const { return m_linux_auth_start; }
+    func_linux_auth_start_v2 get_linux_auth_start_v2() const { return m_linux_auth_start_v2; }
+    func_linux_auth_status get_linux_auth_status() const { return m_linux_auth_status; }
+    func_linux_auth_cancel get_linux_auth_cancel() const { return m_linux_auth_cancel; }
+    func_linux_auth_capabilities get_linux_auth_capabilities() const { return m_linux_auth_capabilities; }
+
     NetworkAbi network_abi() const { return m_network_abi; }
     bool use_legacy_network() const { return m_network_abi == NetworkAbi::Legacy; }
 
@@ -451,6 +463,12 @@ private:
     NetworkLibraryLoadError m_load_error;
 
     // ABI generation of the currently loaded library
+    func_linux_auth_start m_linux_auth_start{nullptr};
+    func_linux_auth_start_v2 m_linux_auth_start_v2{nullptr};
+    func_linux_auth_status m_linux_auth_status{nullptr};
+    func_linux_auth_cancel m_linux_auth_cancel{nullptr};
+    func_linux_auth_capabilities m_linux_auth_capabilities{nullptr};
+
     NetworkAbi m_network_abi{NetworkAbi::Unsupported};
 
     // Function pointers
