@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: a0822f27d8974f4b5095c70d42b8be2f529e37cb
+          ref: 2d0ade5cd040b3cbfc665298dd645522115b236c
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -23,9 +23,37 @@ jobs:
         with:
           path: deps/build
           key: alpha-msvc-x64-release-${{ runner.imageversion }}-${{ hashFiles('deps/**', '!deps/build/**', 'cmake/**') }}
+      - name: Install NSIS packaging tool
+        shell: powershell
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile full Alpha application with X1C controls
         shell: cmd
-        run: build_win.bat --deps --slicer --config release --arch x64 --jobs 2
+        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2
+      - name: Stage installer and verification information
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force installer-artifact | Out-Null
+          $installers = @(Get-ChildItem build/OrcaSlicer_Windows_Installer_*.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
+          Copy-Item $installers[0].FullName installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe
+          $hash = Get-FileHash installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe -Algorithm SHA256
+          "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
+          @"
+          INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
+          Quellstand: 2d0ade5cd040b3cbfc665298dd645522115b236c
+          Alpha-Oberflaeche und Python-Plugins enthalten.
+          Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
+          Keine Freigabe fuer produktive Druckauftraege.
+          Installer verwendet derzeit noch die Upstream-OrcaSlicer-Produktkennung.
+          "@ | Set-Content installer-artifact/TESTSTAND.txt
+      - name: Upload NSIS installer for installation testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrcaStudio-Alpha-Installer-Teststand
+          path: installer-artifact/*
+          if-no-files-found: error
       - name: Preserve compiled application for integration testing
         uses: actions/upload-artifact@v4
         with:
