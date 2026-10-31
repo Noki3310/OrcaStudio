@@ -1501,8 +1501,10 @@ void LinuxRuntimeHost::load_modules()
                         m_component_status = "loaded";
                     }
                 } else {
+                    dlclose(m_component);
+                    m_component = nullptr;
                     m_component_actual_abi_version.clear();
-                    m_component_status = "loaded";
+                    m_component_status = "Network component has no version export; ABI cannot be verified";
                 }
             }
         }
