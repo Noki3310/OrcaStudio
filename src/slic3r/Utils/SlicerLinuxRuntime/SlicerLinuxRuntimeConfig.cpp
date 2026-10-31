@@ -385,15 +385,21 @@ std::string expected_component_abi_version()
     if (const char* configured = std::getenv("SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION");
         configured != nullptr && *configured != '\0')
         return configured;
-    return {};
+    return "02.08.01";
 }
 
 bool abi_version_matches_expected(const std::string& actual_version, std::string* reason)
 {
     const auto expected = expected_component_abi_version();
-    if (expected.empty()) {
-        set_reason(reason, "ok (ABI version selected from downloaded plug-in)");
-        return true;
+    // RuntimeLegacyNetworking.hpp describes only this binary layout.
+    // An environment override cannot make a different layout compatible.
+    const std::string series = "02.08.01";
+    if (actual_version != series &&
+        (actual_version.size() <= series.size() + 1 ||
+         actual_version.compare(0, series.size() + 1, series + ".") != 0 ||
+         actual_version.find_first_not_of("0123456789", series.size() + 1) != std::string::npos)) {
+        set_reason(reason, "Unsupported component ABI: " + actual_version);
+        return false;
     }
     if (actual_version.empty()) {
         set_reason(reason, "actual ABI version empty");
