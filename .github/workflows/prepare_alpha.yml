@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 2d0ade5cd040b3cbfc665298dd645522115b236c
+          ref: 7b6db54030142bcba063ccc95c1515f66dd43bc3
       - name: Install runtime build dependencies
         run: |
           sudo apt-get update
@@ -24,6 +24,7 @@ jobs:
           python3 tools/slicer_linux_runtime/test_runtime_dispatcher.py
           python3 tools/slicer_linux_runtime/test_print_params.py
           python3 tools/slicer_linux_runtime/test_runtime_abi.py
+          python3 tools/slicer_linux_runtime/test_alpha_dispatch.py
           python3 tools/slicer_linux_runtime/test_drying_controls.py
           python3 tools/slicer_linux_runtime/test_drying_status.py
           python3 tools/slicer_linux_runtime/test_nozzle_settings.py
