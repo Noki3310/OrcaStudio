@@ -83,57 +83,10 @@ jobs:
         run: |
           $source = (Get-Content runtime-download/SOURCE_COMMIT.txt -Raw).Trim()
           if ($source -ne '097999e5d1ed96fba69aab6ff1a9ac8e8d63d733') { throw "Unexpected runtime source revision" }
-          foreach ($line in Get-Content runtime-download/SHA256SUMS) {
-            if ($line -notmatch '^([0-9a-f]{64})  (linux-runtime.tar.gz|windows-wsl2-rootfs.tar)
-        shell: powershell
-        run: |
-          choco install nsis --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Compile full Alpha application with X1C controls
-        shell: cmd
-        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2 --slicer-args "-DORCASTUDIO_RUNTIME_PAYLOAD_DIR=%CD%/runtime-payload"
-      - name: Stage installer and verification information
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force installer-artifact | Out-Null
-          $installers = @(Get-ChildItem build/OrcaSlicer_Windows_Installer_*.exe)
-          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
-          Copy-Item $installers[0].FullName installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe
-          $hash = Get-FileHash installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe -Algorithm SHA256
-          "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
-          @"
-          INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
-          Quellstand: a28858b585a532cc5f1d5834060c0c47063e7288
-          Alpha-Oberflaeche und Python-Plugins enthalten.
-          Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
-          Keine Freigabe fuer produktive Druckauftraege.
-          Installer verwendet derzeit noch die Upstream-OrcaSlicer-Produktkennung.
-          "@ | Set-Content installer-artifact/TESTSTAND.txt
-      - name: Upload NSIS installer for installation testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrcaStudio-Alpha-Installer-Teststand
-          path: installer-artifact/*
-          if-no-files-found: error
-      - name: Preserve compiled application for integration testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: alpha-windows-integration-test-only
-          path: |
-            build/src/Release/*.exe
-            build/src/Release/*.dll
-            build/src/Release/python/**
-          if-no-files-found: error
-      - name: Preserve configure logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: alpha-windows-build-logs
-          path: |
-            build/**/CMakeConfigureLog.yaml
-            deps/build/**/CMakeConfigureLog.yaml
-          if-no-files-found: ignore
-) { throw "Invalid manifest entry" }
+          $entries = @(Get-Content runtime-download/SHA256SUMS)
+          if ($entries.Count -ne 2) { throw "Expected two payload checksums" }
+          foreach ($line in $entries) {
+            if ($line -notmatch '^([0-9a-f]{64})  (linux-runtime.tar.gz|windows-wsl2-rootfs.tar)$') { throw "Invalid manifest entry" }
             $expected = $Matches[1]
             $actual = (Get-FileHash ("runtime-download/" + $Matches[2]) -Algorithm SHA256).Hash.ToLower()
             if ($actual -ne $expected) { throw "Runtime artifact hash mismatch" }
@@ -149,7 +102,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile full Alpha application with X1C controls
         shell: cmd
-        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2
+        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2 --slicer-args "-DORCASTUDIO_RUNTIME_PAYLOAD_DIR=%CD%/runtime-payload"
       - name: Stage installer and verification information
         shell: powershell
         run: |
