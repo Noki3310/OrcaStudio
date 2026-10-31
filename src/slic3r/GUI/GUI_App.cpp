@@ -2198,6 +2198,11 @@ int GUI_App::updating_bambu_networking()
 
 bool GUI_App::check_networking_version()
 {
+    // The isolated forwarder has its own ABI, checked by the loader.
+    if (BBLNetworkPlugin::instance().network_abi() == NetworkAbi::Runtime020801) {
+        m_networking_compatible = true;
+        return true;
+    }
     std::string network_ver = Slic3r::NetworkAgent::get_version();
     if (!network_ver.empty()) {
         BOOST_LOG_TRIVIAL(info) << "get_network_agent_version=" << network_ver;
