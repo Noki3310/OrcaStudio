@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 56c13d6c33fb31f137c53935f6246d2ef370b1d2
+          ref: 097999e5d1ed96fba69aab6ff1a9ac8e8d63d733
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -42,7 +42,7 @@ jobs:
           "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
           @"
           INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
-          Quellstand: 56c13d6c33fb31f137c53935f6246d2ef370b1d2
+          Quellstand: 097999e5d1ed96fba69aab6ff1a9ac8e8d63d733
           Alpha-Oberflaeche und Python-Plugins enthalten.
           Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
           Keine Freigabe fuer produktive Druckauftraege.
