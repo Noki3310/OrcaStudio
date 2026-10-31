@@ -749,6 +749,8 @@ using Slic3r::BBLModelTask;
 using Slic3r::OnGetSubTaskFn;
 
 SLICER_LINUX_RUNTIME_EXPORT bool bambu_network_check_debug_consistent(bool) { return true; }
+// Identifies the forwarder's calling convention independently of the backend version.
+SLICER_LINUX_RUNTIME_EXPORT int orca_runtime_network_abi() { return 20801; }
 SLICER_LINUX_RUNTIME_EXPORT std::string bambu_network_get_version() { return runtime_reported_version(); }
 
 SLICER_LINUX_RUNTIME_EXPORT void* bambu_network_create_agent(std::string log_dir)
