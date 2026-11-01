@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 097999e5d1ed96fba69aab6ff1a9ac8e8d63d733
+          ref: 68726a59c110c6dfc07e2458d4f3b3a3658ad93c
       - name: Install runtime build dependencies
         run: |
           sudo apt-get update
@@ -26,6 +26,7 @@ jobs:
           python3 tools/slicer_linux_runtime/test_print_params.py
           python3 tools/slicer_linux_runtime/test_runtime_abi.py
           python3 tools/slicer_linux_runtime/test_alpha_dispatch.py
+          python3 tools/slicer_linux_runtime/test_network_manifest.py
           python3 tools/slicer_linux_runtime/test_drying_controls.py
           python3 tools/slicer_linux_runtime/test_drying_status.py
           python3 tools/slicer_linux_runtime/test_nozzle_settings.py
@@ -49,7 +50,7 @@ jobs:
           mkdir -p runtime-artifact
           tar -czf runtime-artifact/linux-runtime.tar.gz -C tools/slicer_linux_runtime_host/runtime linux-x86_64
           cp tools/slicer_linux_runtime/rootfs/windows-wsl2-rootfs.tar runtime-artifact/
-          printf '%s\n' '097999e5d1ed96fba69aab6ff1a9ac8e8d63d733' > runtime-artifact/SOURCE_COMMIT.txt
+          printf '%s\n' '68726a59c110c6dfc07e2458d4f3b3a3658ad93c' > runtime-artifact/SOURCE_COMMIT.txt
           (cd runtime-artifact && sha256sum linux-runtime.tar.gz windows-wsl2-rootfs.tar > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -63,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: a28858b585a532cc5f1d5834060c0c47063e7288
+          ref: 68726a59c110c6dfc07e2458d4f3b3a3658ad93c
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -82,7 +83,7 @@ jobs:
         shell: powershell
         run: |
           $source = (Get-Content runtime-download/SOURCE_COMMIT.txt -Raw).Trim()
-          if ($source -ne '097999e5d1ed96fba69aab6ff1a9ac8e8d63d733') { throw "Unexpected runtime source revision" }
+          if ($source -ne '68726a59c110c6dfc07e2458d4f3b3a3658ad93c') { throw "Unexpected runtime source revision" }
           $entries = @(Get-Content runtime-download/SHA256SUMS)
           if ($entries.Count -ne 2) { throw "Expected two payload checksums" }
           foreach ($line in $entries) {
@@ -102,23 +103,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile full Alpha application with X1C controls
         shell: cmd
-        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2 --slicer-args "-DORCASTUDIO_RUNTIME_PAYLOAD_DIR=%CD%/runtime-payload"
+        run: build_win.bat --deps --slicer --installer --config release --arch x64 --jobs 2 --slicer-args "-DORCASTUDIO_RUNTIME_PAYLOAD_DIR=%CD%/runtime-payload -DORCASTUDIO_ALPHA_IDENTITY=ON"
       - name: Stage installer and verification information
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force installer-artifact | Out-Null
-          $installers = @(Get-ChildItem build/OrcaSlicer_Windows_Installer_*.exe)
+          $installers = @(Get-ChildItem build/OrcaStudio_Alpha_Windows_Installer_*.exe)
           if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
           Copy-Item $installers[0].FullName installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe
           $hash = Get-FileHash installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe -Algorithm SHA256
           "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
           @"
           INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
-          Quellstand: a28858b585a532cc5f1d5834060c0c47063e7288
+          Quellstand: 68726a59c110c6dfc07e2458d4f3b3a3658ad93c
           Alpha-Oberflaeche und Python-Plugins enthalten.
           Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
           Keine Freigabe fuer produktive Druckauftraege.
-          Installer verwendet derzeit noch die Upstream-OrcaSlicer-Produktkennung.
+          Eigene Installation: OrcaStudio Alpha. Eigener Profilordner: OrcaStudioAlpha.
           "@ | Set-Content installer-artifact/TESTSTAND.txt
       - name: Upload NSIS installer for installation testing
         uses: actions/upload-artifact@v4
