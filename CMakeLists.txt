@@ -81,6 +81,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_VERSION VERSION_LESS "3.25")
 endif ()
 
 include("version.inc")
+option(ORCASTUDIO_ALPHA_IDENTITY "Use an isolated OrcaStudio Alpha installation and user profile" OFF)
+if (ORCASTUDIO_ALPHA_IDENTITY)
+    set(SLIC3R_APP_NAME "OrcaStudio Alpha")
+    add_compile_definitions(ORCASTUDIO_ALPHA_IDENTITY=1)
+endif ()
 include(GNUInstallDirs)
 include(CMakeDependentOption)
 
@@ -1358,5 +1363,19 @@ set(CPACK_CREATE_DESKTOP_LINKS "orca-slicer")
 set (CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE.txt) # must also include in install command
 
 set(CPACK_WIX_UPGRADE_GUID "058245e8-20e0-4a95-9ab7-1acfe17ad511")
+# Keep test installations separate from both OrcaSlicer and stable OrcaStudio.
+# The executable name remains unchanged because internal launchers reference it.
+if (ORCASTUDIO_ALPHA_IDENTITY)
+    set(CPACK_PACKAGE_NAME "OrcaStudio Alpha")
+    set(CPACK_PACKAGE_VENDOR "Noki3310")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "OrcaStudio Alpha")
+    set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "OrcaStudioAlpha")
+    set(CPACK_PACKAGE_EXECUTABLES "orca-slicer;OrcaStudio Alpha")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Noki3310/OrcaStudio")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OrcaStudio Alpha, based on OrcaSlicer")
+    string(REPLACE "OrcaSlicer_Windows_Installer_" "OrcaStudio_Alpha_Windows_Installer_"
+           CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}")
+    set(CPACK_WIX_UPGRADE_GUID "f32c45ec-8ced-4a1d-b3d9-bda45991a243")
+endif ()
 set(CPACK_GENERATOR NSIS)
 include(CPack)
