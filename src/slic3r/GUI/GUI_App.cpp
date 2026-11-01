@@ -1429,7 +1429,8 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     std::string download_url;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
-    http_url.timeout_connect(TIMEOUT_CONNECT)
+    http_url.size_limit(4ULL * 1024ULL * 1024ULL)
+        .timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
         .on_complete(
@@ -1501,16 +1502,33 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                 result = -1;
             }
         })
-        .on_complete([&pro_fn, tmp_path, target_file_path](std::string body, unsigned status) {
-            BOOST_LOG_TRIVIAL(info) << "[download_plugin 2] completed";
-            bool cancel = false;
-            int percent = 0;
-            fs::fstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
-            file.write(body.c_str(), body.size());
-            file.close();
-            fs::rename(tmp_path, target_file_path);
-            if (pro_fn) pro_fn(InstallStatusDownloadCompleted, 80, cancel);
-            })
+        .on_complete([this, &pro_fn, &result, &err_msg, cancel_fn, tmp_path, target_file_path](std::string body, unsigned status) {
+            bool cancel = m_networking_cancel_update || (cancel_fn && cancel_fn());
+            if (cancel) {
+                result = -1;
+                err_msg = "Network package download canceled";
+                return;
+            }
+            try {
+                fs::fstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
+                file.write(body.data(), static_cast<std::streamsize>(body.size()));
+                file.close();
+                if (!file) {
+                    result = -1;
+                    err_msg = "Failed to write downloaded network package";
+                } else if (m_networking_cancel_update || (cancel_fn && cancel_fn())) {
+                    result = -1;
+                    err_msg = "Network package download canceled";
+                } else {
+                    fs::rename(tmp_path, target_file_path);
+                    if (pro_fn) pro_fn(InstallStatusDownloadCompleted, 80, cancel);
+                    if (cancel) result = -1;
+                }
+            } catch (const std::exception& error) {
+                result = -1;
+                err_msg = error.what();
+            }
+        })
         .on_error([&pro_fn, &result, &err_msg](std::string body, std::string error, unsigned int status) {
             bool cancel = false;
             if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
@@ -1519,6 +1537,14 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
             result = -1;
         });
     http.perform_sync();
+    if (m_networking_cancel_update || (cancel_fn && cancel_fn()))
+        result = -1;
+    if (result < 0) {
+        // Failed or canceled downloads must never install a package left by an earlier attempt.
+        boost::system::error_code ignored;
+        fs::remove(tmp_path, ignored);
+        fs::remove(target_file_path, ignored);
+    }
 
     // No version adoption: the stored identity is the AA.BB.CC series, so install_plugin() names
     // the library after the configured series regardless of which build the series-keyed endpoint
