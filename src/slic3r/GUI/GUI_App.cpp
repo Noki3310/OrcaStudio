@@ -2690,7 +2690,12 @@ void GUI_App::init_webview_runtime()
 void GUI_App::init_app_config()
 {
 	// Profiles for the alpha are stored into the PrusaSlicer-alpha directory to not mix with the current release.
+#ifdef ORCASTUDIO_ALPHA_IDENTITY
+    // Separate profile directory, retaining the upstream translation catalog and file formats.
+    SetAppName("OrcaStudioAlpha");
+#else
     SetAppName(SLIC3R_APP_KEY);
+#endif
 //	SetAppName(SLIC3R_APP_KEY "-alpha");
 //  SetAppName(SLIC3R_APP_KEY "-beta");
 //	SetAppDisplayName(SLIC3R_APP_NAME);
@@ -10249,8 +10254,13 @@ void GUI_App::associate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
+#ifdef ORCASTUDIO_ALPHA_IDENTITY
+    std::wstring prog_id = L"OrcaStudio.Alpha.1";
+    std::wstring prog_desc = L"OrcaStudio Alpha";
+#else
     std::wstring prog_id = L" Orca.Slicer.1";
     std::wstring prog_desc = L"OrcaSlicer";
+#endif
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;
@@ -10276,8 +10286,13 @@ void GUI_App::disassociate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
+#ifdef ORCASTUDIO_ALPHA_IDENTITY
+    std::wstring prog_id = L"OrcaStudio.Alpha.1";
+    std::wstring prog_desc = L"OrcaStudio Alpha";
+#else
     std::wstring prog_id = L" Orca.Slicer.1";
     std::wstring prog_desc = L"OrcaSlicer";
+#endif
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;
