@@ -1,5 +1,6 @@
 #include "BBLNetworkPlugin.hpp"
 #include "NetworkAgent.hpp"
+#include "RuntimeNetworkSetup.hpp"
 
 #include <mutex>
 #include <boost/filesystem/path.hpp>
@@ -109,8 +110,7 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
     }
 
     // Explicit integration-test selection until runtime download/auth packaging is complete.
-    const char* runtime_setting = ::getenv("ORCASTUDIO_USE_LINUX_RUNTIME");
-    const bool use_runtime = runtime_setting && std::strcmp(runtime_setting, "1") == 0;
+    const bool use_runtime = runtime_network_requested();
 
     // Auto-migration: If loading legacy version and versioned library doesn't exist,
     // but unversioned legacy library does exist, copy it to versioned format
@@ -150,7 +150,9 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
                            : resolve_library_path(version);
 
     if (use_runtime) {
-        library = get_libpath_in_current_directory("slicer_linux_runtime");
+        const auto installed_runtime = plugin_folder / "linux-runtime" / "slicer_linux_runtime.dll";
+        library = boost::filesystem::is_regular_file(installed_runtime)
+            ? installed_runtime.string() : get_libpath_in_current_directory("slicer_linux_runtime");
         if (library.empty()) {
             set_load_error(_u8L("Network library not found"),
                            "OrcaStudio runtime library is missing from the application directory", "");
