@@ -17,6 +17,7 @@
 #include "slic3r/Utils/BBLCloudServiceAgent.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
 #include "slic3r/Utils/NetworkPluginManifest.hpp"
+#include "slic3r/Utils/RuntimeNetworkSetup.hpp"
 #include "GUI_Init.hpp"
 #include "GUI_ObjectList.hpp"
 #include "slic3r/GUI/UserManager.hpp"
@@ -1353,7 +1354,9 @@ std::string GUI_App::get_plugin_url(std::string name, std::string country_code)
     std::string url = get_http_url(country_code);
 
     std::string curr_version;
-    if (use_legacy_network_plugin()) {
+    if (name == "plugins" && runtime_network_requested()) {
+        curr_version = "02.08.01.00";
+    } else if (use_legacy_network_plugin()) {
         curr_version = BAMBU_NETWORK_AGENT_VERSION_LEGACY;
     } else if (name == "plugins" && app_config) {
         std::string user_version = app_config->get_network_plugin_version();
@@ -1420,6 +1423,9 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
 #else
     std::string os_type = "windows";
 #endif
+
+    if (name == "plugins" && runtime_network_requested())
+        os_type = "linux";
 
     // get_url
     std::string  url = get_plugin_url(name, app_config->get_country_code());
@@ -1559,6 +1565,24 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
 {
     bool cancel = false;
     std::string target_file_path = (fs::temp_directory_path() / package_name).string();
+#ifdef _WIN32
+    if (name == "plugins" && runtime_network_requested()) {
+        const auto bundle = fs::path(wxStandardPaths::Get().GetExecutablePath().ToUTF8().data()).parent_path();
+        std::string error;
+        const auto canceled = [&] { return m_networking_cancel_update || (cancel_fn && cancel_fn()); };
+        if (!install_runtime_network_package(target_file_path, bundle.string(), canceled, error)) {
+            BOOST_LOG_TRIVIAL(error) << "[runtime install] " << error;
+            if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
+            return InstallStatusUnzipFailed;
+        }
+        app_config->set_network_plugin_version("02.08.01");
+        app_config->set_bool("installed_networking", true);
+        CallAfter([this] { if (app_config) app_config->save(); });
+        if (pro_fn) pro_fn(InstallStatusInstallCompleted, 100, cancel);
+        return 0;
+    }
+#endif
+
 
     BOOST_LOG_TRIVIAL(info) << "[install_plugin] enter";
     // get plugin folder
