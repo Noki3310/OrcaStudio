@@ -13,20 +13,21 @@ concurrency:
 jobs:
   runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d40d479ead15fe5743545715b4cdddd920e76ac5
+          ref: 35bd60b096a17a0c718a0c38cc8142383d182db2
       - name: Install runtime build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libboost-dev libssl-dev libcurl4-openssl-dev zlib1g-dev nlohmann-json3-dev libwebkit2gtk-4.1-dev dbus-x11 epiphany-browser libasound2t64 libpulse0 novnc openbox openssl websockify x11vnc xvfb
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends cmake ninja-build libboost-dev libssl-dev libcurl4-openssl-dev zlib1g-dev nlohmann-json3-dev libwebkit2gtk-4.1-dev dbus-x11 epiphany-browser libasound2t64 libpulse0 novnc openbox openssl websockify x11vnc xvfb
       - name: Run runtime regression tests
         run: |
           python3 tools/slicer_linux_runtime/test_http_request.py
           python3 tools/slicer_linux_runtime/test_http_adapter.py
           python3 tools/slicer_linux_runtime/test_runtime_selection.py
+          python3 tools/slicer_linux_runtime/test_source_module.py
           python3 tools/slicer_linux_runtime/test_runtime_dispatcher.py
           python3 tools/slicer_linux_runtime/test_print_params.py
           python3 tools/slicer_linux_runtime/test_runtime_abi.py
@@ -56,7 +57,7 @@ jobs:
           mkdir -p runtime-artifact
           tar -czf runtime-artifact/linux-runtime.tar.gz -C tools/slicer_linux_runtime_host/runtime linux-x86_64
           cp tools/slicer_linux_runtime/rootfs/windows-wsl2-rootfs.tar runtime-artifact/
-          printf '%s\n' 'd40d479ead15fe5743545715b4cdddd920e76ac5' > runtime-artifact/SOURCE_COMMIT.txt
+          printf '%s\n' '35bd60b096a17a0c718a0c38cc8142383d182db2' > runtime-artifact/SOURCE_COMMIT.txt
           (cd runtime-artifact && sha256sum linux-runtime.tar.gz windows-wsl2-rootfs.tar > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -70,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d40d479ead15fe5743545715b4cdddd920e76ac5
+          ref: 35bd60b096a17a0c718a0c38cc8142383d182db2
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -89,7 +90,7 @@ jobs:
         shell: powershell
         run: |
           $source = (Get-Content runtime-download/SOURCE_COMMIT.txt -Raw).Trim()
-          if ($source -ne 'd40d479ead15fe5743545715b4cdddd920e76ac5') { throw "Unexpected runtime source revision" }
+          if ($source -ne '35bd60b096a17a0c718a0c38cc8142383d182db2') { throw "Unexpected runtime source revision" }
           $entries = @(Get-Content runtime-download/SHA256SUMS)
           if ($entries.Count -ne 2) { throw "Expected two payload checksums" }
           foreach ($line in $entries) {
@@ -120,16 +121,17 @@ jobs:
           $hash = Get-FileHash installer-artifact/OrcaStudio-Alpha-Integration-Test-Setup.exe -Algorithm SHA256
           "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
           @"
-          INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
-          Quellstand: d40d479ead15fe5743545715b4cdddd920e76ac5
+          X1C-INTEGRATIONSTEST, GERAETEABNAHME NOCH OFFEN
+          Quellstand: 35bd60b096a17a0c718a0c38cc8142383d182db2
           Alpha-Oberflaeche und Python-Plugins enthalten.
-          Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
+          Experimenteller X1C-Pfad mit HTTP-, Kamera- und Dateimodul-Anbindung enthalten.
           Auswahl unter Einstellungen > Netzwerk: Experimentelle X1C-Verbindung verwenden.
           Danach OrcaStudio neu starten. Windows muss WSL 2 bereitstellen.
           Anmeldung und echter X1C-Druck noch nicht abgenommen.
           Keine Freigabe fuer produktive Druckauftraege.
           Eigene Installation: OrcaStudio Alpha. Eigener Profilordner: OrcaStudioAlpha.
           "@ | Set-Content installer-artifact/TESTSTAND.txt
+          Copy-Item docs/HLSD/X1C_TESTANLEITUNG.md installer-artifact/ANLEITUNG.md
       - name: Upload NSIS installer for installation testing
         uses: actions/upload-artifact@v4
         with:
@@ -154,3 +156,29 @@ jobs:
             build/**/CMakeConfigureLog.yaml
             deps/build/**/CMakeConfigureLog.yaml
           if-no-files-found: ignore
+  publish-test:
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OrcaStudio-Alpha-Installer-Teststand
+          path: installer-artifact
+      - name: Publish successful build as prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd installer-artifact
+          sha256sum -c SHA256SUMS.txt
+          printf '%s\n\n' 'Experimenteller Windows-Teststand. Die reale X1C-Abnahme und vollständige Funktionsprüfung stehen noch aus.' 'Quellstand: 35bd60b096a17a0c718a0c38cc8142383d182db2' > RELEASE.md
+          cat ANLEITUNG.md >> RELEASE.md
+          tag='alpha-x1c-35bd60b0'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release already exists; keeping its original assets."
+          else
+            gh release create "$tag" --target '35bd60b096a17a0c718a0c38cc8142383d182db2' --prerelease --latest=false --title 'OrcaStudio Alpha X1C Test 35bd60b0' --notes-file RELEASE.md OrcaStudio-Alpha-Integration-Test-Setup.exe SHA256SUMS.txt TESTSTAND.txt ANLEITUNG.md
+          fi
