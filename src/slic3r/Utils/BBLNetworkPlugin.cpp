@@ -1,4 +1,5 @@
 #include "BBLNetworkPlugin.hpp"
+#include <nlohmann/json.hpp>
 #include "NetworkAgent.hpp"
 #include "RuntimeNetworkSetup.hpp"
 
@@ -31,6 +32,48 @@
 #endif
 
 namespace Slic3r {
+
+int BBLNetworkPlugin::linux_runtime_http_request(
+    const std::string& method,
+    const std::string& url,
+    const std::vector<std::string>& header_lines,
+    const std::string& request_body,
+    const std::string& multipart_json,
+    const std::string& range,
+    std::size_t max_bytes,
+    long connect_timeout_ms,
+    long timeout_ms,
+    func_linux_http_progress progress_cb,
+    func_linux_http_cancel cancel_cb,
+    void* callback_user,
+    unsigned int* http_status,
+    std::string* response_body,
+    std::string* response_headers,
+    std::string* primary_ip,
+    std::string* error)
+{
+    auto& plugin = instance();
+    auto module_lock = plugin.lock_auth_module();
+    if (!plugin.m_networking_module || plugin.m_network_abi != NetworkAbi::Runtime020801) {
+        if (error) *error = "OrcaStudio runtime transport is not loaded";
+        return -1;
+    }
+#ifdef _WIN32
+    auto fn = reinterpret_cast<func_linux_http_request>(::GetProcAddress(plugin.m_networking_module, "slicer_linux_runtime_http_request"));
+#else
+    auto fn = reinterpret_cast<func_linux_http_request>(dlsym(plugin.m_networking_module, "slicer_linux_runtime_http_request"));
+#endif
+    if (!fn) {
+        if (error) *error = "Runtime HTTP transport export is missing";
+        return -1;
+    }
+    const nlohmann::json headers = header_lines;
+    return fn(method, url, headers.dump(), request_body, multipart_json, range,
+        static_cast<unsigned long long>(max_bytes), connect_timeout_ms, timeout_ms,
+        progress_cb, cancel_cb, callback_user,
+        http_status, response_body, response_headers, primary_ip, error);
+}
+
 
 #define BAMBU_SOURCE_LIBRARY "BambuSource"
 
