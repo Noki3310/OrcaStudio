@@ -2225,6 +2225,14 @@ void PreferencesDialog::create_items()
     auto item_enable_plugin    = create_item_checkbox(_L("Enable Bambu network plug-in"), "", "installed_networking");
     g_sizer->Add(item_enable_plugin);
 
+#ifdef _WIN32
+    auto item_x1c_runtime = create_item_checkbox(
+        _L("Use experimental X1C connection"),
+        _L("Use the bundled Linux runtime for the Bambu connection without a separate Bambu Connect application. Requires WSL 2 and an application restart. Printer communication is still being validated. Disable this option to return to the standard network plug-in."),
+        "use_x1c_runtime", _L("(Requires restart)"));
+    g_sizer->Add(item_x1c_runtime);
+#endif
+
     auto item_plugin_version = create_item_network_plugin_version(_L("Network plug-in version"), _L("Select the network plug-in version to use"));
     g_sizer->Add(item_plugin_version);
 
