@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 0a4182344871009f3b84d18a8b2c5f7f71440274
+          ref: d49671b76c3617a4760a5364e340cdbbcc90979e
       - name: Install runtime build dependencies
         run: |
           sudo apt-get update
@@ -22,6 +22,7 @@ jobs:
       - name: Run runtime regression tests
         run: |
           python3 tools/slicer_linux_runtime/test_http_request.py
+          python3 tools/slicer_linux_runtime/test_http_adapter.py
           python3 tools/slicer_linux_runtime/test_runtime_dispatcher.py
           python3 tools/slicer_linux_runtime/test_print_params.py
           python3 tools/slicer_linux_runtime/test_runtime_abi.py
@@ -51,7 +52,7 @@ jobs:
           mkdir -p runtime-artifact
           tar -czf runtime-artifact/linux-runtime.tar.gz -C tools/slicer_linux_runtime_host/runtime linux-x86_64
           cp tools/slicer_linux_runtime/rootfs/windows-wsl2-rootfs.tar runtime-artifact/
-          printf '%s\n' '0a4182344871009f3b84d18a8b2c5f7f71440274' > runtime-artifact/SOURCE_COMMIT.txt
+          printf '%s\n' 'd49671b76c3617a4760a5364e340cdbbcc90979e' > runtime-artifact/SOURCE_COMMIT.txt
           (cd runtime-artifact && sha256sum linux-runtime.tar.gz windows-wsl2-rootfs.tar > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -65,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 0a4182344871009f3b84d18a8b2c5f7f71440274
+          ref: d49671b76c3617a4760a5364e340cdbbcc90979e
           lfs: false
       - uses: lukka/get-cmake@latest
         with:
@@ -84,7 +85,7 @@ jobs:
         shell: powershell
         run: |
           $source = (Get-Content runtime-download/SOURCE_COMMIT.txt -Raw).Trim()
-          if ($source -ne '0a4182344871009f3b84d18a8b2c5f7f71440274') { throw "Unexpected runtime source revision" }
+          if ($source -ne 'd49671b76c3617a4760a5364e340cdbbcc90979e') { throw "Unexpected runtime source revision" }
           $entries = @(Get-Content runtime-download/SHA256SUMS)
           if ($entries.Count -ne 2) { throw "Expected two payload checksums" }
           foreach ($line in $entries) {
@@ -116,7 +117,7 @@ jobs:
           "$($hash.Hash.ToLower())  OrcaStudio-Alpha-Integration-Test-Setup.exe" | Set-Content installer-artifact/SHA256SUMS.txt
           @"
           INSTALLATIONS-TESTSTAND, KEIN FERTIGES ORCASTUDIO-UPDATE
-          Quellstand: 0a4182344871009f3b84d18a8b2c5f7f71440274
+          Quellstand: d49671b76c3617a4760a5364e340cdbbcc90979e
           Alpha-Oberflaeche und Python-Plugins enthalten.
           Direkte X1C-Anbindung ueber die OrcaStudio-Runtime noch nicht fertig integriert.
           Keine Freigabe fuer produktive Druckauftraege.
