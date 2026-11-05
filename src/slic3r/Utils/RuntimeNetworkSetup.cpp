@@ -93,7 +93,7 @@ bool install_runtime_network_package(const std::string& archive_path,
         const std::vector<std::string> args = {
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.string(),
             "-PackageDir", bundle_dir, "-ComponentDir", staging.string(),
-            "-ComponentCacheDir", cache.string(), "-DistroName", distro
+            "-ComponentCacheDir", cache.string(), "-DistroName", distro, "-RequireComponent"
         };
         check_cancel();
         bp::child child(powershell, bp::args(args), bp::std_out > output.string(),
@@ -104,8 +104,12 @@ bool install_runtime_network_package(const std::string& archive_path,
         if (child.exit_code() != 0) {
             fs::ifstream stream(errors);
             std::string details((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            if (details.empty()) {
+                fs::ifstream output_stream(output);
+                details.assign(std::istreambuf_iterator<char>(output_stream), std::istreambuf_iterator<char>());
+            }
             if (details.size() > 8000) details = details.substr(details.size() - 8000);
-            throw std::runtime_error("Runtime setup failed: " + details);
+            throw std::runtime_error("Runtime setup failed (exit " + std::to_string(child.exit_code()) + "): " + details);
         }
         check_cancel();
         {
