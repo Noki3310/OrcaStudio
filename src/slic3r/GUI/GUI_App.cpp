@@ -1435,7 +1435,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     std::string download_url;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
-    http_url.size_limit(4ULL * 1024ULL * 1024ULL)
+    http_url.via_native_transport().size_limit(4ULL * 1024ULL * 1024ULL)
         .timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
@@ -1486,7 +1486,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     // download
     Slic3r::Http http = Slic3r::Http::get(download_url);
     int reported_percent = 0;
-    http.header("X-BBL-OS-Type", os_type)
+    http.via_native_transport().header("X-BBL-OS-Type", os_type)
         .on_progress(
         [this, &pro_fn, cancel_fn, &result, &reported_percent, &err_msg](Slic3r::Http::Progress progress, bool& cancel) {
             int percent = 0;
