@@ -1575,7 +1575,7 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
             if (!canceled()) {
                 CallAfter([this, error] {
                     MessageDialog dialog(mainframe, wxString::FromUTF8(error.c_str()),
-                                         _L("Network plug-in installation failed"), wxOK | wxICON_ERROR);
+                                         _L("Error"), wxOK | wxICON_ERROR);
                     dialog.ShowModal();
                 });
             }
