@@ -29,7 +29,7 @@ Der Aufruf hält das Netzwerkmodul gegen paralleles Entladen fest und prüft die
 - Quellstand d49671b76c3617a4760a5364e340cdbbcc90979e: vollständiger Windows-Build einschließlich Installer erfolgreich, Actions-Lauf 42013933199.
 - Installer-Artefakt dieses Laufs: 13415259685; ZIP-SHA256 0eba502ff9c3972d7f38e061e3912787d3b3ee0cd4e2c3f65ff558d46c920a7c.
 - Dieser Installer enthält die HTTP-Anbindung, aber noch nicht den danach ergänzten Einstellungsschalter.
-- Quellstand d40d479ead15fe5743545715b4cdddd920e76ac5 ergänzt Schalter, deutsche Texte, Header-Zuordnung und Auswahltests. Build dafür: Actions-Lauf 42069139404. Sein Ergebnis ist hier noch nicht als erfolgreich bestätigt.
+- Quellstand d40d479ead15fe5743545715b4cdddd920e76ac5 ergänzt Schalter, deutsche Texte, Header-Zuordnung und Auswahltests. Build dafür: Actions-Lauf 42069139404. Der Lauf wurde nach 90 Minuten während der Installation der Linux-Build-Abhängigkeiten abgebrochen; der Windows-Build wurde nicht gestartet.
 
 Die Tests prüfen die produktive HTTP-Adapterfunktion mit einem ersetzten Transport: binäre Inhalte, Dateiausschnitte, fehlende Dateien, Größenbegrenzung, Zeitlimitüberlauf, Antwort-Callbacks und Abbruch. Die 15 bestehenden HTTP-Exporttests und der Alpha-Druckadaptertest bestanden ebenfalls. Der Auswahltest prüft Standardzustand, gespeicherte Auswahl, Umgebungsvariable und Plattformbegrenzung. Diese Tests ersetzen keinen Druckertest.
 
@@ -38,7 +38,7 @@ Die Tests prüfen die produktive HTTP-Adapterfunktion mit einem ersetzten Transp
 - Installation und Einrichtung auf einem frischen Windows-System.
 - Vollständiger Login, Wiederanmeldung, Kamera und Druckübertragung am realen X1C.
 - Vollständige Prüfung aller Alpha-Funktionen und installierbaren Python-Plug-ins in diesem Paket.
-- Der ältere Runtime-Druckadapter weist Aufträge mit queue_plate_id ausdrücklich zurück; die neuere Druckwarteschlange ist damit noch nicht vollständig angebunden.
+- Der ältere Runtime-Druckadapter weist Aufträge mit nicht leerem queue_plate_id ausdrücklich zurück. Im geprüften Alpha-Quellstand wird dieses Feld außerhalb von Definition und Adapter nicht gesetzt; daraus allein folgt keine fehlende sichtbare Warteschlangenfunktion.
 - Vollständige deutsche Übersetzung aller Oberflächen und Hilfetexte.
 - Prüfung aller Netzwerkaufrufe hinsichtlich gleichzeitigem Entladen und Callback-Lebensdauer.
 - Die neue X1C-Firmware ist mit diesem Stand nicht praktisch abgenommen.
@@ -48,3 +48,9 @@ Trocknen während eines Drucks mit externer Spule/Bypass wurde vom Nutzer für d
 ## Bedeutung von „erfolgreich gebaut“
 
 Ein erfolgreicher Build liefert einen prüfbaren Installer. Er bestätigt weder vollständige Funktionsgleichheit noch eine erfolgreiche Geräteabnahme. Bis diese Nachweise vorliegen, bleibt die Ausgabe ein Integrationsteststand.
+
+## Ergänzungen für den nächsten Testinstaller
+
+Kamera und Dateizugriff erhalten bei ausgewählter Runtime deren Source-Modul. Es wird kein zweites natives Windows-Modul gesucht und der geliehene Handle nicht doppelt freigegeben. Aktive Tunnel oder Callbacks verhindern das Entladen; vor dem Freigeben wird die Runtime heruntergefahren. Der Austausch einer laufenden Runtime erfordert einen Neustart. Der neue Regressionstest prüft diese Pfade mit den produktiven Methoden und einem simulierten Loader.
+
+Die Einrichtung verlangt nun eine erfolgreiche Prüfung der heruntergeladenen Netzwerkkomponente. Fehler enthalten den Exitcode und die verfügbare Ausgabe des Einrichtungsprozesses und werden in der Oberfläche angezeigt. Anleitung und Gerätetestliste: [X1C_TESTANLEITUNG.md](X1C_TESTANLEITUNG.md).
