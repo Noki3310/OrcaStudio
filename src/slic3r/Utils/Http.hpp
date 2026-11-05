@@ -92,6 +92,7 @@ public:
 
 	//BBS set global header for each http request
 	static void set_extra_headers(std::map<std::string, std::string> headers);
+    static void set_bambu_extra_headers(std::map<std::string, std::string> headers);
 	static std::map<std::string, std::string> get_extra_headers();
 
 	~Http();
@@ -127,6 +128,8 @@ public:
 	// shared client for compatibility with self-signed print hosts; opt in for any
 	// request carrying authentication credentials or sensitive user data.
 	Http& tls_verify(bool enable);
+    Http& via_linux_runtime(bool enable = true);
+    Http& via_native_transport(bool enable = true);
 
 	Http& form_clear();
 	// Add a HTTP multipart form field
