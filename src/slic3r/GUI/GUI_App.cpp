@@ -1572,6 +1572,13 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
         const auto canceled = [&] { return m_networking_cancel_update || (cancel_fn && cancel_fn()); };
         if (!install_runtime_network_package(target_file_path, bundle.string(), canceled, error)) {
             BOOST_LOG_TRIVIAL(error) << "[runtime install] " << error;
+            if (!canceled()) {
+                CallAfter([this, error] {
+                    MessageDialog dialog(mainframe, wxString::FromUTF8(error.c_str()),
+                                         _L("Network plug-in installation failed"), wxOK | wxICON_ERROR);
+                    dialog.ShowModal();
+                });
+            }
             if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
             return InstallStatusUnzipFailed;
         }
@@ -2013,6 +2020,11 @@ void GUI_App::migrate_network_plugin_config()
 
 bool GUI_App::hot_reload_network_plugin()
 {
+    // Runtime streams and asynchronous callbacks require a process restart;
+    // never tear them down through the native plug-in hot-reload sequence.
+    if (BBLNetworkPlugin::instance().network_abi() == NetworkAbi::Runtime020801)
+        return false;
+
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": starting hot reload";
 
     wxBusyCursor busy;
