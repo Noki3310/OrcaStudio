@@ -1,5 +1,7 @@
 #include "BBLCloudServiceAgent.hpp"
 #include "BBLNetworkPlugin.hpp"
+#include "Http.hpp"
+#include "RuntimeNetworkSetup.hpp"
 
 #include <boost/log/trivial.hpp>
 #include "CloudProvider.hpp"
@@ -83,6 +85,24 @@ std::map<std::string, std::string> BBLCloudServiceAgent::get_extra_header()
     std::ostringstream os_version;
     os_version << major << "." << minor << "." << micro;
     extra_headers.emplace("X-BBL-OS-Version", os_version.str());
+
+    // The isolated transport runs in Linux even when the GUI runs on Windows.
+    // Keep this metadata scoped to Bambu requests; third-party hosts retain Alpha defaults.
+    if (runtime_network_requested()) {
+        extra_headers["X-BBL-OS-Type"] = "linux";
+        extra_headers["X-BBL-OS-Version"] = "0.0.0";
+        auto& plugin = BBLNetworkPlugin::instance();
+        auto module_lock = plugin.lock_auth_module();
+        if (auto capabilities = plugin.get_linux_auth_capabilities()) {
+            try {
+                const auto info = nlohmann::json::parse(capabilities());
+                const auto version = info.value("linux_os_version", std::string());
+                if (!version.empty()) extra_headers["X-BBL-OS-Version"] = version;
+            } catch (const std::exception&) {
+                // Older hosts may not report an OS version; keep the neutral fallback.
+            }
+        }
+    }
 
     auto& app = GUI::wxGetApp();
     if (app.app_config) {
@@ -845,17 +865,15 @@ int BBLCloudServiceAgent::get_model_mall_rating_result(int job_id, std::string& 
 
 int BBLCloudServiceAgent::set_extra_http_header()
 {
-    // Orca: not sure if this required to login into bbl cloud
-    // Slic3r::Http::set_extra_headers(extra_headers);
+    auto extra_headers = get_extra_header();
+    Http::set_bambu_extra_headers(runtime_network_requested() ? extra_headers : std::map<std::string, std::string>{});
 
     auto& plugin = BBLNetworkPlugin::instance();
-    auto  agent  = plugin.get_agent();
-
+    auto module_lock = plugin.lock_auth_module();
+    auto agent = plugin.get_agent();
     auto func = plugin.get_set_extra_http_header();
-    if (func && agent) {
-        auto extra_headers = get_extra_header();
+    if (func && agent)
         return func(agent, extra_headers);
-    }
     return -1;
 }
 
