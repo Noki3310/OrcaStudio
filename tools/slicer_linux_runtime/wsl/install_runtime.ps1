@@ -5,6 +5,7 @@ param(
     [string]$DistroName = "",
     [string]$InstallDir = "",
     [switch]$ReplaceExisting,
+    [switch]$RequireComponent,
     [switch]$SkipCopyToComponentDir
 )
 
@@ -635,9 +636,11 @@ $verifyArgs = @(
     '-PackageDir', $PackageDir,
     '-DistroName', $DistroName,
     '-InstallDir', $InstallDir,
-    '-ComponentCacheDir', $ComponentCacheDir,
-    '-AllowMissingComponent'
+    '-ComponentCacheDir', $ComponentCacheDir
 )
+if (-not $RequireComponent) {
+    $verifyArgs += '-AllowMissingComponent'
+}
 
 $verifyShell = $null
 $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
