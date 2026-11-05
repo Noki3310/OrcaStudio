@@ -285,11 +285,29 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
 int BBLNetworkPlugin::unload()
 {
     auto auth_lock = lock_auth_module();
+    using CountFn = int (*)();
+    using ShutdownFn = void (*)();
+    CountFn active_tunnels = nullptr;
+    CountFn active_callbacks = nullptr;
+    ShutdownFn shutdown = nullptr;
+    if (m_networking_module && m_network_abi == NetworkAbi::Runtime020801) {
+        active_tunnels = reinterpret_cast<CountFn>(get_function("slicer_linux_runtime_forwarder_active_tunnels"));
+        active_callbacks = reinterpret_cast<CountFn>(get_function("slicer_linux_runtime_forwarder_active_callbacks"));
+        shutdown = reinterpret_cast<ShutdownFn>(get_function("slicer_linux_runtime_forwarder_shutdown"));
+        // Do not unload code referenced by live streams or queued GUI callbacks.
+        if (!active_tunnels || !active_callbacks || !shutdown || active_tunnels() != 0 || active_callbacks() != 0)
+            return -3;
+    }
     // Orca: destroy the plugin agent while its creating DLL is still loaded, so the void* handle
     // never dangles into freed memory. A stale m_agent surviving the unload makes create_agent()
     // short-circuit on has_agent() after a hot reload, and the next call into the freshly loaded
     // DLL dereferences the old-DLL handle -> access violation.
     destroy_agent();
+
+    if (active_callbacks && active_callbacks() != 0)
+        return -3;
+    if (shutdown)
+        shutdown();
 
     UnloadFTModule();
 
@@ -390,6 +408,12 @@ HMODULE BBLNetworkPlugin::get_source_module()
 void* BBLNetworkPlugin::get_source_module()
 #endif
 {
+    auto module_lock = lock_auth_module();
+    // The forwarder exports both network and BambuSource entry points. Borrow
+    // its handle without taking a second ownership slot (and double-closing it).
+    if (m_network_abi == NetworkAbi::Runtime020801)
+        return m_networking_module;
+
     if ((m_source_module) || (!m_networking_module))
         return m_source_module;
 
