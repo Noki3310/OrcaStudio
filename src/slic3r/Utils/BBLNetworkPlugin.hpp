@@ -4,6 +4,7 @@
 #include "bambu_networking.hpp"
 #include "libslic3r/ProjectTask.hpp"
 #include "libslic3r/AppConfig.hpp"
+#include <cstddef>
 #include <string>
 #include <memory>
 #include <vector>
@@ -163,6 +164,17 @@ typedef int (*func_delete_filament_spools)(void *agent, FilamentDeleteParams par
 typedef int (*func_get_filament_config)(void *agent, std::string* http_body);
 typedef int (*func_sync_ams_filaments)(void *agent, AmsSyncParams params, std::string* http_body);
 
+typedef int (*func_linux_http_progress)(void* user, unsigned long long download_total,
+    unsigned long long download_now, unsigned long long upload_total,
+    unsigned long long upload_now, double upload_speed);
+typedef bool (*func_linux_http_cancel)(void* user);
+typedef int (*func_linux_http_request)(std::string method, std::string url, std::string headers_json,
+    std::string request_body, std::string multipart_json, std::string range,
+    unsigned long long max_bytes, long connect_timeout_ms, long timeout_ms,
+    func_linux_http_progress progress_cb, func_linux_http_cancel cancel_cb, void* callback_user,
+    unsigned int* http_status, std::string* response_body, std::string* response_headers,
+    std::string* primary_ip, std::string* error);
+
 /**
  * BBLNetworkPlugin - Singleton managing the Bambu Lab network DLL.
  *
@@ -181,6 +193,25 @@ typedef int (*func_sync_ams_filaments)(void *agent, AmsSyncParams params, std::s
  */
 class BBLNetworkPlugin {
 public:
+    static int linux_runtime_http_request(
+        const std::string& method,
+        const std::string& url,
+        const std::vector<std::string>& header_lines,
+        const std::string& request_body,
+        const std::string& multipart_json,
+        const std::string& range,
+        std::size_t max_bytes,
+        long connect_timeout_ms,
+        long timeout_ms,
+        func_linux_http_progress progress_cb,
+        func_linux_http_cancel cancel_cb,
+        void* callback_user,
+        unsigned int* http_status,
+        std::string* response_body,
+        std::string* response_headers,
+        std::string* primary_ip,
+        std::string* error);
+
     // Singleton access
     static BBLNetworkPlugin& instance();
 
